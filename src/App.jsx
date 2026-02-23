@@ -25,13 +25,14 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 // -----------------------------------------------------------------------------
 // Constants & Mock Data
 // -----------------------------------------------------------------------------
-const SONG_MAP_TAGS = ['I', 'V', 'V1', 'V2', 'PC', 'C', 'B', 'IT', 'FW', 'L1', 'L2', 'L3', 'OT', 'E'];
+const SONG_MAP_TAGS = ['I', 'V', 'V1', 'V2', 'PC', 'C', 'C1', 'C2', 'C3', 'B', 'IT', 'FW', 'L1', 'L2', 'L3', 'OT', 'E'];
 const STRUCTURAL_TAGS = ['I', 'IT', 'FW', 'L1', 'L2', 'L3', 'OT', 'E'];
 const KEYS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B', 'D-E', 'E-F#', 'F-G', 'G-A'];
 
 const TAG_EXPLANATIONS = {
   'I': '前奏 (Intro)', 'V': '主歌 (Verse)', 'V1': '第一節主歌 (Verse 1)', 'V2': '第二節主歌 (Verse 2)',
-  'PC': '導歌 (Pre Chorus)', 'C': '副歌 (Chorus)', 'B': '橋段 (Bridge)', 'IT': '間奏 (Interlude)',
+  'PC': '導歌 (Pre Chorus)', 'C': '副歌 (Chorus)', 'C1': '副歌 1 (Chorus 1)', 'C2': '副歌 2 (Chorus 2)', 'C3': '副歌 3 (Chorus 3)', 
+  'B': '橋段 (Bridge)', 'IT': '間奏 (Interlude)',
   'FW': '自由敬拜 (Free Worship)', 'L1': '最後一句 (Last Line)', 'L2': '最後兩句 (Last 2 Lines)',
   'L3': '最後三句 (Last 3 Lines)', 'OT': '尾奏 (Outro)', 'E': '結尾 (Ending)'
 };
@@ -77,7 +78,7 @@ const MOCK_SETLISTS = [
 // -----------------------------------------------------------------------------
 const callGeminiLyricsAI = async (title, artist, ytLink) => {
   const apiKey = ""; // 執行環境會自動提供 API Key
-  const systemPrompt = `你是一個專業的教會敬拜詩歌助手。請幫我找到這首詩歌的完整歌詞並將其結構化。要求的 JSON 格式：[{"section": "V", "text": "歌詞內容..."}, ...] 段落標記：'V', 'V1', 'V2', 'PC', 'C', 'B'。規則：清洗吉他和弦與雜訊，僅輸出 JSON。`;
+  const systemPrompt = `你是一個專業的教會敬拜詩歌助手。請幫我找到這首詩歌的完整歌詞並將其結構化。要求的 JSON 格式：[{"section": "V", "text": "歌詞內容..."}, ...] 段落標記：'V', 'V1', 'V2', 'PC', 'C', 'C1', 'C2', 'C3', 'B'。規則：清洗吉他和弦與雜訊，僅輸出 JSON。`;
   const userQuery = `歌名：${title}, 歌手：${artist}, 參考連結：${ytLink}。請使用 Google Search 確保歌詞準確。`;
 
   const payload = {
