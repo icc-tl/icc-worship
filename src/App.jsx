@@ -80,7 +80,7 @@ const ICCLogo = ({ className }) => (
   <div className={`flex flex-col items-center justify-center ${className}`}>
     <img 
       src="https://static.wixstatic.com/media/bdcebb_ef3ed0565d6d4ffc8f41b87e4edc0599~mv2.png/v1/fill/w_236,h_64,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ICC_Logo.png" 
-      alt="Irvine City Church Logo" className="h-10 sm:h-14 object-contain"
+      alt="Irvine City Church Logo" className="h-8 sm:h-14 object-contain"
     />
   </div>
 );
@@ -135,8 +135,8 @@ export default function App() {
   const [deleteSetlistConfirmId, setDeleteSetlistConfirmId] = useState(null);
   const [homeSearchQuery, setHomeSearchQuery] = useState(''); 
 
-  // --- AI / Feature State ---
-  const [showComingSoonModal, setShowComingSoonModal] = useState(false); // 取代了 showAIModal
+  // --- Feature State ---
+  const [showComingSoonModal, setShowComingSoonModal] = useState(false); 
 
   // --- Editor State ---
   const [editingItem, setEditingItem] = useState(null);
@@ -263,7 +263,7 @@ export default function App() {
     return (item.date && item.date.includes(q)) || (item.wl && item.wl.toLowerCase().includes(q)) || (item.songs && item.songs.some(s => s.title?.toLowerCase().includes(q)));
   });
 
-  // --- 新增：歌曲熱度統計與排行榜計算 ---
+  // --- 歌曲熱度統計與排行榜計算 ---
   const songStats = React.useMemo(() => {
     const stats = {};
     const now = new Date();
@@ -277,11 +277,9 @@ export default function App() {
       setlistsDb.forEach(sl => {
         if (sl.songs && sl.songs.some(s => s.songId === song.id)) {
           const setlistDate = new Date(sl.date);
-          // 計算近三個月的次數
           if (setlistDate >= threeMonthsAgo && setlistDate <= now) {
             count3Months++;
           }
-          // 找出最後一次唱的日期
           if (!latestDate || setlistDate > latestDate) {
             latestDate = setlistDate;
           }
@@ -299,20 +297,31 @@ export default function App() {
     return stats;
   }, [songsDb, setlistsDb]);
 
-  // 將計算結果合併至清單，並依據熱度排序
   const displaySongs = React.useMemo(() => {
     return (searchQuery ? searchResults : songsDb).map(song => ({
       ...song,
       stats: songStats[song.id] || { count3Months: 0, weeksAgo: null }
     })).sort((a, b) => {
-      // 若沒有搜尋關鍵字，則依照熱度排序 (降冪)
       if (!searchQuery && b.stats.count3Months !== a.stats.count3Months) {
         return b.stats.count3Months - a.stats.count3Months; 
       }
-      // 熱度相同或有搜尋時，依照筆畫排序
       return (a.title || '').localeCompare(b.title || '');
     });
   }, [songsDb, searchResults, searchQuery, songStats]);
+
+  const libraryDisplaySongs = React.useMemo(() => {
+    return songsDb.filter(s => (s.title||'').toLowerCase().includes(librarySearch.toLowerCase()) || (s.artist||'').toLowerCase().includes(librarySearch.toLowerCase()))
+      .map(song => ({
+        ...song,
+        stats: songStats[song.id] || { count3Months: 0, weeksAgo: null }
+      })).sort((a, b) => {
+        if (!librarySearch && b.stats.count3Months !== a.stats.count3Months) {
+          return b.stats.count3Months - a.stats.count3Months;
+        }
+        return (a.title || '').localeCompare(b.title || '');
+      });
+  }, [songsDb, librarySearch, songStats]);
+
 
   const saveCurrentSetlist = async () => {
     if (!user) return;
@@ -364,11 +373,10 @@ export default function App() {
         });
       }
       
-      // 這裡直接抓取預覽畫面中「可見的」 DOM 元素，確保 CSS 渲染 100% 同步
       const el = document.getElementById('pdf-print-area');
       const dateStr = meta.date ? meta.date.replace(/-/g, '') : 'Date';
       const opt = { 
-        margin: [0, 0, 0, 0], // 設定為0，透過內部 padding 控制，排版更精準
+        margin: [0, 0, 0, 0], 
         filename: `ICC_WorshipMap_${dateStr}.pdf`, 
         image: { type: 'jpeg', quality: 1 },
         html2canvas: { scale: 2, useCORS: true, letterRendering: true }, 
@@ -454,7 +462,7 @@ export default function App() {
   // Render Components
   // -----------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-[#FAFAFA] text-slate-900 font-sans relative overflow-x-hidden">
+    <div className="min-h-screen bg-[#FAFAFA] text-slate-900 font-sans relative overflow-x-hidden flex flex-col">
 
       {/* Hidden Print Area */}
       <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
@@ -466,15 +474,15 @@ export default function App() {
       {/* Auth Modal */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl text-center">
+          <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-sm w-full shadow-2xl text-center">
             <div className="text-5xl mb-4 animate-bounce">🐰</div>
             <h3 className="text-xl font-bold text-slate-900 mb-2 flex items-center justify-center gap-2">
               <Lock size={20} className="text-sky-500"/> 系統驗證
             </h3>
             <div className="text-slate-600 text-[14px] leading-relaxed mb-6 font-medium bg-sky-50 p-4 rounded-xl border border-sky-100 shadow-inner">
-              編輯功能目前僅開放主領使用，<br/>如需權限請洽師母 🥺
+              編輯功能目前僅開放主領使用，<br/>如需權限請洽師母 🙏
             </div>
-            <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuthSubmit()} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none transition focus:border-sky-500 text-center text-lg tracking-widest mb-2 shadow-sm" placeholder="••••" autoFocus />
+            <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuthSubmit()} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none transition focus:border-sky-500 text-center text-lg tracking-widest mb-2 shadow-sm" placeholder="******" autoFocus />
             {authError && <p className="text-red-500 text-xs font-bold mb-2">{authError}</p>}
             <div className="flex justify-center gap-3 mt-6">
               <button onClick={() => setShowAuthModal(false)} className="px-5 py-2.5 text-sm text-slate-500 hover:bg-slate-100 rounded-xl transition font-bold">取消返回</button>
@@ -484,15 +492,15 @@ export default function App() {
         </div>
       )}
 
-      {/* Coming Soon Modal (取代原本的 AI Modal) */}
+      {/* Coming Soon Modal */}
       {showComingSoonModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl text-center relative overflow-hidden">
+          <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-sm w-full shadow-2xl text-center relative overflow-hidden">
             <button onClick={() => setShowComingSoonModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><X size={20}/></button>
             <div className="text-6xl mb-4 animate-bounce mt-2">🙇‍♂️</div>
             <h3 className="text-2xl font-bold text-slate-900 mb-2 font-serif">敬請期待</h3>
             <p className="text-slate-600 mb-8 text-[15px] leading-relaxed font-medium">
-              AI 智能歌詞抓取功能開發中！<br/>爭取在牧師安息回來前做出來 🥺
+              AI 智能歌詞抓取功能開發中！<br/>爭取在牧師安息回來前做出來 🙏
             </p>
             <button onClick={() => setShowComingSoonModal(false)} className="w-full px-4 py-3.5 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-xl transition shadow-lg text-sm tracking-widest">
               我知道了
@@ -503,21 +511,24 @@ export default function App() {
 
       {/* Top Navbar */}
       {view !== 'preview' && (
-        <div className="bg-white border-b border-slate-200 text-slate-600 text-xs py-3 px-6 flex justify-between items-center relative z-50 shadow-sm">
-          <div className="flex items-center gap-4">
+        <div className="bg-white border-b border-slate-200 text-slate-600 text-xs py-3 px-4 sm:px-6 flex flex-col sm:flex-row justify-center sm:justify-between items-center relative z-50 shadow-sm gap-3">
+          <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 w-full sm:w-auto">
             <div className="flex items-center gap-2">
               {isAdmin ? <span className="text-sky-600 font-bold flex items-center gap-1"><Unlock size={12}/> 權限已解鎖</span> : <span className="flex items-center gap-1"><Lock size={12}/> 訪客模式</span>}
             </div>
             {/* 資料庫連線狀態指示 */}
-            <div className="flex items-center gap-1.5 border-l border-slate-200 pl-4">
+            <div className="flex items-center gap-1.5 border-l border-slate-200 pl-3 sm:pl-4">
               {user ? (
-                <span className="text-emerald-500 font-bold flex items-center gap-1.5 tracking-widest"><div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> 雲端資料庫已連線</span>
+                <span className="text-emerald-500 font-bold flex items-center gap-1.5 tracking-widest"><div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> 雲端連線</span>
               ) : (
                 <span className="text-amber-500 font-bold flex items-center gap-1.5 tracking-widest"><Loader2 size={12} className="animate-spin" /> 連線中...</span>
               )}
             </div>
           </div>
-          <div className="flex items-center gap-4">{view !== 'home' && <button onClick={() => setView('home')} className="hover:text-sky-600 transition flex items-center gap-1"><Home size={12}/> 返回首頁</button>}<button onClick={() => requireAdmin(() => setView('manage'))} className="hover:text-sky-600 transition flex items-center gap-1"><Database size={12}/> 雲端詩歌庫</button></div>
+          <div className="flex flex-wrap items-center justify-center gap-4 w-full sm:w-auto">
+            {view !== 'home' && <button onClick={() => setView('home')} className="hover:text-sky-600 transition flex items-center gap-1"><Home size={12}/> 返回首頁</button>}
+            <button onClick={() => requireAdmin(() => setView('manage'))} className="hover:text-sky-600 transition flex items-center gap-1"><Database size={12}/> 雲端詩歌庫</button>
+          </div>
         </div>
       )}
 
@@ -525,57 +536,67 @@ export default function App() {
       {view === 'home' && (
         <div className="pb-20">
           <ConfirmModal isOpen={deleteSetlistConfirmId !== null} title="確定刪除？" onCancel={() => setDeleteSetlistConfirmId(null)} onConfirm={() => executeDeleteSetlist(deleteSetlistConfirmId)} />
-          <div className="max-w-6xl mx-auto p-4 sm:p-8 relative pt-4 text-center">
-            <header className="mb-12 border-b border-slate-200 pb-8 flex flex-col items-center">
-              <ICCLogo className="mb-6" />
-              <div className="flex items-center gap-3 mb-4"><Crown size={24} className="text-[#C4A977]"/><h1 className="text-4xl sm:text-5xl font-serif font-bold tracking-[0.08em] text-slate-900 uppercase">ICC Worship Hub</h1><Crown size={24} className="text-[#C4A977]"/></div>
-              <p className="text-slate-500 font-medium mb-6">用心靈與誠實敬拜</p>
-              <p className="text-slate-400 text-[13px] italic font-serif max-w-lg leading-relaxed px-4">「當用各樣的智慧，把基督的道理豐豐富富地存在心裡，用詩章、頌詞、靈歌，彼此教導，互相勸戒，心被恩感，歌頌神。」<span className="block mt-1 font-sans font-bold text-[#C4A977] uppercase text-[10px]"> — 歌羅西書 3:16 —</span></p>
+          <div className="max-w-6xl mx-auto p-4 sm:p-8 relative pt-6 sm:pt-4 text-center">
+            <header className="mb-10 sm:mb-12 border-b border-slate-200 pb-6 sm:pb-8 flex flex-col items-center">
+              <ICCLogo className="mb-4 sm:mb-6" />
+              <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mb-3 sm:mb-4 px-2">
+                <BookOpen size={24} className="text-[#C4A977] hidden sm:block"/>
+                <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-bold tracking-[0.05em] sm:tracking-[0.08em] text-slate-900 uppercase">ICC Worship Corner</h1>
+                <Music size={24} className="text-[#C4A977] hidden sm:block"/>
+              </div>
+              <p className="text-slate-500 font-medium mb-4 sm:mb-6 flex items-center justify-center gap-2 text-sm sm:text-base">
+                <Sparkles size={16} className="text-sky-400"/>
+                用心靈和誠實敬拜
+                <Sparkles size={16} className="text-sky-400"/>
+              </p>
             </header>
 
-            <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4 text-left">
-              <h2 className="text-2xl font-bold flex items-center gap-2 font-serif text-slate-900"><CalendarDays size={24} className="text-sky-500"/> 近期歌單總覽</h2>
-              <div className="flex gap-3 w-full md:w-auto"><input type="text" placeholder="搜尋日期、主領或歌名..." className="w-full md:w-[350px] pl-4 pr-4 py-2.5 border rounded-xl bg-white focus:border-sky-500 shadow-sm outline-none transition" value={homeSearchQuery} onChange={e => setHomeSearchQuery(e.target.value)} /><button onClick={() => requireAdmin(createNewSetlist)} className="bg-sky-500 hover:bg-sky-600 text-white px-6 py-2.5 rounded-xl shadow-lg font-bold text-sm whitespace-nowrap transition">+ 預備歌單</button></div>
+            <div className="flex flex-col md:flex-row justify-between items-center mb-6 sm:mb-8 gap-4 text-left">
+              <h2 className="text-xl sm:text-2xl font-bold flex items-center gap-2 font-serif text-slate-900"><CalendarDays size={24} className="text-sky-500"/> 近期歌單總覽</h2>
+              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                <input type="text" placeholder="搜尋日期、主領或歌名..." className="w-full sm:w-[350px] pl-4 pr-4 py-2.5 border rounded-xl bg-white focus:border-sky-500 shadow-sm outline-none transition text-sm sm:text-base" value={homeSearchQuery} onChange={e => setHomeSearchQuery(e.target.value)} />
+                <button onClick={() => requireAdmin(createNewSetlist)} className="bg-sky-500 hover:bg-sky-600 text-white px-6 py-2.5 rounded-xl shadow-lg font-bold text-sm whitespace-nowrap transition w-full sm:w-auto flex justify-center items-center gap-1">+ 預備歌單</button>
+              </div>
             </div>
 
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm divide-y divide-slate-100 text-left flex flex-col">
               {filteredHomeSetlists.length > 0 ? filteredHomeSetlists.map(item => {
                 const parts = item.date ? item.date.split('-') : [];
                 return (
-                  <div key={item.id} className="p-6 md:p-8 hover:bg-slate-50 transition flex flex-col md:flex-row gap-6 md:gap-8 items-start md:items-center group">
+                  <div key={item.id} className="p-4 sm:p-6 md:p-8 hover:bg-slate-50 transition flex flex-col md:flex-row gap-4 sm:gap-6 md:gap-8 items-start md:items-center group">
                     
-                    <div className="flex gap-5 items-center shrink-0 min-w-[220px]">
-                      <div className="text-center w-16">
-                        <div className="text-[11px] font-bold text-sky-500 uppercase tracking-widest">{parts[1] ? getMonthNameShort(parts[1]) : 'MTH'}</div>
-                        <div className="text-3xl font-serif font-bold text-slate-900 my-0.5 leading-none">{parts[2] || 'DD'}</div>
-                        <div className="text-[10px] font-mono text-slate-400">{parts[0] || 'YYYY'}</div>
+                    <div className="flex gap-4 sm:gap-5 items-center shrink-0 w-full sm:w-auto min-w-[200px] border-b sm:border-0 border-slate-100 pb-3 sm:pb-0">
+                      <div className="text-center w-14 sm:w-16">
+                        <div className="text-[10px] sm:text-[11px] font-bold text-sky-500 uppercase tracking-widest">{parts[1] ? getMonthNameShort(parts[1]) : 'MTH'}</div>
+                        <div className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 my-0.5 leading-none">{parts[2] || 'DD'}</div>
+                        <div className="text-[9px] sm:text-[10px] font-mono text-slate-400">{parts[0] || 'YYYY'}</div>
                       </div>
-                      <div className="w-px h-12 bg-slate-200 hidden md:block group-hover:bg-sky-200 transition"></div>
+                      <div className="w-px h-10 sm:h-12 bg-slate-200 group-hover:bg-sky-200 transition hidden sm:block"></div>
                       <div className="flex flex-col gap-1">
                         <div className="text-sm font-bold text-slate-800 flex items-center gap-1.5"><User size={14} className="text-sky-500"/> {item.wl || '未指定主領'}</div>
-                        <div className="text-[10px] text-slate-400 italic">更新: {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '-'}</div>
+                        <div className="text-[9px] sm:text-[10px] text-slate-400 italic">更新: {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '-'}</div>
                       </div>
                     </div>
                     
-                    <div className="flex-1 w-full">
-                      <div className="flex flex-wrap gap-2.5">
+                    <div className="flex-1 w-full mt-2 sm:mt-0">
+                      <div className="flex flex-wrap gap-2">
                         {item.songs?.map((s, i) => (
-                          <span key={i} className="inline-flex items-center text-[13px] font-medium text-slate-700 bg-white border border-slate-200 px-3 py-1.5 rounded-full shadow-sm group-hover:border-sky-200 transition">
-                            <span className="text-sky-500 font-bold mr-2 opacity-80">{i+1}.</span> {s.title}
+                          <span key={i} className="inline-flex items-center text-[12px] sm:text-[13px] font-medium text-slate-700 bg-white border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-full shadow-sm group-hover:border-sky-200 transition">
+                            <span className="text-sky-500 font-bold mr-1.5 opacity-80">{i+1}.</span> <span className="truncate max-w-[150px] sm:max-w-none">{s.title}</span>
                           </span>
                         ))}
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-2.5 shrink-0 w-full md:w-auto justify-end border-t md:border-t-0 border-slate-100 pt-5 md:pt-0 mt-2 md:mt-0">
-                      <button onClick={() => openPreviewFromHome(item)} className="px-5 py-2.5 bg-sky-500 text-white text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex items-center gap-2"><Eye size={16}/> 預覽</button>
-                      <button onClick={() => requireAdmin(() => openSetlist(item))} className="p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:text-sky-600 hover:border-sky-300 transition shadow-sm" title="編輯"><Edit2 size={16}/></button>
-                      <button onClick={() => requireAdmin(() => setDeleteSetlistConfirmId(item.id))} className="p-2.5 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm" title="刪除"><Trash2 size={16}/></button>
+                    <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-4 sm:pt-0 mt-2 sm:mt-0 border-t sm:border-0 border-slate-50">
+                      <button onClick={() => openPreviewFromHome(item)} className="flex-1 sm:flex-none px-4 sm:px-5 py-2 sm:py-2.5 bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex justify-center items-center gap-2"><Eye size={16}/> 預覽</button>
+                      <button onClick={() => requireAdmin(() => openSetlist(item))} className="p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:text-sky-600 hover:border-sky-300 transition shadow-sm" title="編輯"><Edit2 size={16}/></button>
+                      <button onClick={() => requireAdmin(() => setDeleteSetlistConfirmId(item.id))} className="p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm" title="刪除"><Trash2 size={16}/></button>
                     </div>
                   </div>
                 );
               }) : (
-                <div className="p-20 text-center text-slate-400">
+                <div className="p-16 sm:p-20 text-center text-slate-400">
                   <ListMusic size={40} className="mx-auto mb-4 opacity-20" />
                   <p className="text-sm">查無歌單紀錄。</p>
                 </div>
@@ -586,123 +607,147 @@ export default function App() {
       )}
 
       {view === 'list' && (
-        <div className="pb-20 max-w-4xl mx-auto p-4 sm:p-8 pt-6">
-          <header className="mb-10 text-center flex flex-col items-center border-b border-slate-200 pb-6"><ICCLogo className="mb-5 scale-90" /><h1 className="text-3xl font-serif font-bold text-slate-900 mb-2 uppercase">{currentSetlistId ? '編輯歌單' : '建立新歌單'}</h1></header>
-          <div className="flex flex-wrap justify-end mb-6 gap-3"><button onClick={saveCurrentSetlist} disabled={isSavingSetlist} className={`px-6 py-2.5 rounded-xl font-serif text-sm transition shadow-sm flex items-center gap-2 ${saveSuccess ? 'bg-green-600 text-white' : 'bg-white border border-sky-500 text-sky-600 hover:bg-sky-50'}`}><Save size={18}/> {isSavingSetlist ? '儲存中...' : (saveSuccess ? '已成功儲存！' : '儲存歌單')}</button><button onClick={openPreviewFromList} className="px-6 py-2.5 rounded-xl font-serif text-sm bg-sky-500 hover:bg-sky-600 text-white flex items-center gap-2 shadow-lg transition"><Eye size={18}/> 預覽與輸出</button></div>
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
-            <div className="md:col-span-4 bg-white p-6 border rounded-2xl h-fit shadow-sm">
-              <h2 className="text-sm font-bold tracking-widest text-slate-900 border-b pb-3 mb-6 uppercase">Information</h2>
+        <div className="pb-20 max-w-4xl mx-auto p-4 sm:p-8 pt-4 sm:pt-6 w-full">
+          <header className="mb-6 sm:mb-10 text-center flex flex-col items-center border-b border-slate-200 pb-4 sm:pb-6"><ICCLogo className="mb-4 sm:mb-5 scale-90" /><h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 mb-2 uppercase">{currentSetlistId ? '編輯歌單' : '建立新歌單'}</h1></header>
+          <div className="flex flex-col sm:flex-row justify-end mb-6 gap-3">
+            <button onClick={saveCurrentSetlist} disabled={isSavingSetlist} className={`w-full sm:w-auto px-6 py-2.5 rounded-xl font-serif text-sm transition shadow-sm flex items-center justify-center gap-2 ${saveSuccess ? 'bg-green-600 text-white' : 'bg-white border border-sky-500 text-sky-600 hover:bg-sky-50'}`}><Save size={18}/> {isSavingSetlist ? '儲存中...' : (saveSuccess ? '已成功儲存！' : '儲存歌單')}</button>
+            <button onClick={openPreviewFromList} className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-serif text-sm bg-sky-500 hover:bg-sky-600 text-white flex items-center justify-center gap-2 shadow-lg transition"><Eye size={18}/> 預覽與輸出</button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 sm:gap-8">
+            <div className="md:col-span-4 bg-white p-5 sm:p-6 border rounded-2xl h-fit shadow-sm">
+              <h2 className="text-xs sm:text-sm font-bold tracking-widest text-slate-900 border-b pb-3 mb-5 sm:mb-6 uppercase">Information</h2>
               <div className="space-y-4">
-                <div><label className="text-[10px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">日期</label><input type="date" value={meta.date} onChange={e => setMeta({...meta, date: e.target.value})} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition" /></div>
-                <div><label className="text-[10px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">主領</label><input type="text" value={meta.wl} onChange={e => setMeta({...meta, wl: e.target.value})} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition" placeholder="例如：Rudy" /></div>
+                <div><label className="text-[10px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">日期</label><input type="date" value={meta.date} onChange={e => setMeta({...meta, date: e.target.value})} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" /></div>
+                <div><label className="text-[10px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">主領</label><input type="text" value={meta.wl} onChange={e => setMeta({...meta, wl: e.target.value})} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder="例如：Rudy" /></div>
               </div>
             </div>
             <div className="md:col-span-8 space-y-4">
-              <div className="flex justify-between items-end border-b pb-3"><h2 className="text-sm font-bold uppercase tracking-widest">Setlist</h2><button onClick={() => openEditor()} className="text-xs font-bold text-sky-600 bg-sky-50 hover:bg-sky-100 px-4 py-2 rounded-lg transition">+ 新增詩歌</button></div>
-              <div className="space-y-3">{setlist.map((item, index) => (<div key={item.id} className="bg-white border rounded-2xl p-4 flex items-center justify-between group shadow-sm transition hover:border-sky-200"><div className="flex-1"><div className="flex items-center gap-3 mb-1"><span className="bg-sky-100 text-sky-700 px-2 py-0.5 rounded text-xs font-bold">0{index + 1}</span><h3 className="font-bold font-serif text-lg">{item.title} <span className="font-sans font-normal text-slate-400 text-sm">({item.key})</span></h3></div><p className="text-[13px] text-blue-600 font-mono pl-9 font-bold tracking-wider">{item.mapString || '未設定段落'}</p></div><div className="flex items-center gap-2"><div className="flex flex-col gap-0.5"><button onClick={() => moveItem(index, 'up')} className="p-1 text-slate-400 hover:text-sky-600 transition"><ArrowUp size={14}/></button><button onClick={() => moveItem(index, 'down')} className="p-1 text-slate-400 hover:text-sky-600 transition"><ArrowDown size={14}/></button></div><button onClick={() => openEditor(item)} className="p-2 text-slate-400 hover:text-sky-600 transition"><Edit2 size={16}/></button><button onClick={() => deleteItem(item.id)} className="p-2 text-slate-300 hover:text-red-600 transition"><Trash2 size={16}/></button></div></div>))}</div>
+              <div className="flex justify-between items-end border-b pb-3"><h2 className="text-xs sm:text-sm font-bold uppercase tracking-widest">Setlist</h2><button onClick={() => openEditor()} className="text-xs font-bold text-sky-600 bg-sky-50 hover:bg-sky-100 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg transition">+ 新增詩歌</button></div>
+              <div className="space-y-3">
+                {setlist.map((item, index) => (
+                  <div key={item.id} className="bg-white border rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between group shadow-sm transition hover:border-sky-200 gap-3">
+                    <div className="flex-1 w-full overflow-hidden">
+                      <div className="flex items-center gap-2 sm:gap-3 mb-1">
+                        <span className="bg-sky-100 text-sky-700 px-2 py-0.5 rounded text-[10px] sm:text-xs font-bold shrink-0">0{index + 1}</span>
+                        <h3 className="font-bold font-serif text-base sm:text-lg truncate">{item.title} <span className="font-sans font-normal text-slate-400 text-xs sm:text-sm">({item.key})</span></h3>
+                      </div>
+                      <div className="text-[11px] sm:text-[13px] text-blue-600 font-mono pl-8 sm:pl-9 font-bold tracking-wider overflow-x-auto custom-scrollbar pb-1">
+                        {item.mapString || '未設定段落'}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-end gap-1.5 sm:gap-2 pt-2 sm:pt-0 border-t sm:border-0 border-slate-50 w-full sm:w-auto">
+                      <div className="flex flex-row sm:flex-col gap-1 sm:gap-0.5 mr-auto sm:mr-0">
+                        <button onClick={() => moveItem(index, 'up')} className="p-1.5 sm:p-1 text-slate-400 hover:text-sky-600 transition bg-slate-50 sm:bg-transparent rounded sm:rounded-none"><ArrowUp size={14}/></button>
+                        <button onClick={() => moveItem(index, 'down')} className="p-1.5 sm:p-1 text-slate-400 hover:text-sky-600 transition bg-slate-50 sm:bg-transparent rounded sm:rounded-none"><ArrowDown size={14}/></button>
+                      </div>
+                      <button onClick={() => openEditor(item)} className="p-2 sm:p-2 text-slate-500 hover:text-sky-600 transition bg-slate-50 sm:bg-transparent rounded-lg"><Edit2 size={16}/></button>
+                      <button onClick={() => deleteItem(item.id)} className="p-2 sm:p-2 text-slate-400 hover:text-red-600 transition bg-slate-50 sm:bg-transparent rounded-lg"><Trash2 size={16}/></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
       )}
 
       {view === 'editor' && (
-        <div className="pb-20 max-w-5xl mx-auto p-4 sm:p-8 pt-4">
-          <header className="mb-8 border-b pb-6 flex justify-between items-center"><button onClick={() => setView('list')} className="flex items-center gap-2 font-medium text-slate-500 hover:text-slate-900 transition"><ChevronLeft size={18}/> 返回歌單</button><div className="font-serif tracking-widest uppercase font-bold text-slate-700">{editingItem ? '編輯歌曲段落' : '新增歌曲至歌單'}</div></header>
+        <div className="pb-20 max-w-5xl mx-auto p-4 sm:p-8 pt-4 w-full">
+          <header className="mb-6 sm:mb-8 border-b pb-4 sm:pb-6 flex justify-between items-center"><button onClick={() => setView('list')} className="flex items-center gap-1 sm:gap-2 font-medium text-slate-500 hover:text-slate-900 transition text-sm sm:text-base"><ChevronLeft size={18}/> 返回歌單</button><div className="font-serif tracking-widest text-xs sm:text-sm uppercase font-bold text-slate-700">{editingItem ? '編輯歌曲' : '新增歌曲'}</div></header>
           <div className="bg-white border rounded-2xl shadow-sm overflow-hidden">
-            <div className="p-8 bg-[#FAFAFA] border-b">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="p-5 sm:p-8 bg-[#FAFAFA] border-b">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 sm:gap-6">
                 <div className="md:col-span-3 relative" ref={searchRef}>
-                  <label className="text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">由雲端資料庫搜尋或新增</label>
-                  <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-5 w-5" /><input type="text" value={searchQuery} onChange={e => { setSearchQuery(e.target.value); setShowDropdown(true); }} className="w-full pl-10 pr-3 py-3 border-b-2 bg-transparent focus:border-sky-500 outline-none font-serif text-lg transition" placeholder="輸入歌名搜尋..." /></div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-                    {/* 按鈕改為呼叫 showComingSoonModal */}
-                    <button onClick={() => requireAdmin(() => setShowComingSoonModal(true))} className="py-2.5 px-4 bg-gradient-to-r from-sky-50 to-transparent border border-sky-100 hover:border-sky-300 rounded-xl text-[13px] text-slate-700 font-bold flex items-center justify-center gap-2 transition shadow-sm hover:shadow">
-                      <Sparkles size={16} className="text-sky-500"/> 找不到？AI 智能抓取
+                  <label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1.5 sm:mb-2 uppercase tracking-widest">由雲端資料庫搜尋或新增</label>
+                  <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4 sm:h-5 sm:w-5" /><input type="text" value={searchQuery} onChange={e => { setSearchQuery(e.target.value); setShowDropdown(true); }} className="w-full pl-9 sm:pl-10 pr-3 py-2.5 sm:py-3 border-b-2 bg-transparent focus:border-sky-500 outline-none font-serif text-base sm:text-lg transition" placeholder="輸入歌名搜尋..." /></div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 mt-3 sm:mt-4">
+                    <button onClick={() => requireAdmin(() => setShowComingSoonModal(true))} className="py-2 sm:py-2.5 px-3 sm:px-4 bg-gradient-to-r from-sky-50 to-transparent border border-sky-100 hover:border-sky-300 rounded-xl text-xs sm:text-[13px] text-slate-700 font-bold flex items-center justify-center gap-1.5 sm:gap-2 transition shadow-sm hover:shadow">
+                      <Sparkles size={14} className="text-sky-500"/> 找不到？AI 智能抓取
                     </button>
-                    <button onClick={() => requireAdmin(() => openManualEntry(null, '', 'editor'))} className="py-2.5 px-4 bg-white border border-slate-200 hover:border-sky-500 rounded-xl text-[13px] text-slate-700 font-bold flex items-center justify-center gap-2 transition shadow-sm hover:shadow">
-                      <Edit2 size={16} className="text-slate-400"/> 手動建立新詩歌
+                    <button onClick={() => requireAdmin(() => openManualEntry(null, '', 'editor'))} className="py-2 sm:py-2.5 px-3 sm:px-4 bg-white border border-slate-200 hover:border-sky-500 rounded-xl text-xs sm:text-[13px] text-slate-700 font-bold flex items-center justify-center gap-1.5 sm:gap-2 transition shadow-sm hover:shadow">
+                      <Edit2 size={14} className="text-slate-400"/> 手動建立新詩歌
                     </button>
                   </div>
-                  {/* 只有在有選擇歌曲時，才顯示覆蓋式的下拉選單以供切換；若無選擇，則會顯示在下方的全畫面網格中 */}
                   {showDropdown && searchQuery && currentSong && (
                     <ul className="absolute z-20 mt-2 w-full bg-white shadow-2xl border rounded-2xl max-h-64 overflow-auto border-slate-100">
-                      {searchResults.length > 0 ? searchResults.map(s => (<li key={s.id} onClick={() => handleSelectSong(s)} className="p-4 border-b last:border-0 border-slate-50 flex justify-between cursor-pointer hover:bg-slate-50 group transition"><span className="font-serif font-bold text-slate-800 group-hover:text-sky-600">{s.title}</span><span className="text-xs text-slate-400 uppercase tracking-widest group-hover:text-sky-500">{s.artist}</span></li>)) : <li className="p-10 text-center bg-slate-50"><p className="mb-2 text-sm text-slate-500 font-bold">雲端資料庫查無此歌 🥺</p><p className="text-xs text-slate-400 mb-4">請點擊上方按鈕使用 AI 或手動新增</p></li>}
+                      {searchResults.length > 0 ? searchResults.map(s => (<li key={s.id} onClick={() => handleSelectSong(s)} className="p-3 sm:p-4 border-b last:border-0 border-slate-50 flex justify-between cursor-pointer hover:bg-slate-50 group transition"><span className="font-serif font-bold text-slate-800 group-hover:text-sky-600 text-sm sm:text-base">{s.title}</span><span className="text-[10px] sm:text-xs text-slate-400 uppercase tracking-widest group-hover:text-sky-500">{s.artist}</span></li>)) : <li className="p-8 sm:p-10 text-center bg-slate-50"><p className="mb-2 text-xs sm:text-sm text-slate-500 font-bold">雲端資料庫查無此歌 🥺</p><p className="text-[10px] sm:text-xs text-slate-400 mb-2">請點擊上方按鈕使用 AI 或手動新增</p></li>}
                     </ul>
                   )}
                 </div>
-                <div className="md:col-span-1"><label className="text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">調性 (Key)</label><select value={currentKey} onChange={e => setCurrentKey(e.target.value)} className="w-full px-3 py-3 border-b-2 bg-transparent focus:border-sky-500 font-sans text-base transition outline-none">{KEYS.map(k => <option key={k} value={k}>{k}</option>)}</select></div>
+                <div className="md:col-span-1"><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1.5 sm:mb-2 uppercase tracking-widest">調性 (Key)</label><select value={currentKey} onChange={e => setCurrentKey(e.target.value)} className="w-full px-2 sm:px-3 py-2.5 sm:py-3 border-b-2 bg-transparent focus:border-sky-500 font-sans text-sm sm:text-base transition outline-none">{KEYS.map(k => <option key={k} value={k}>{k}</option>)}</select></div>
               </div>
             </div>
             
-            {/* 根據是否已選擇歌曲，切換下方畫面 */}
             {currentSong ? (
-              <div className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-12 bg-white">
-                <div>
-                  <div className="flex flex-wrap gap-3 mb-8"><a href={currentSong.youtubeId ? `https://youtu.be/${currentSong.youtubeId}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(currentSong.title)}`} target="_blank" rel="noopener noreferrer" className="px-4 py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl text-sm font-bold flex items-center gap-2 transition hover:bg-red-100"><Youtube size={16}/> YouTube 聆聽</a><button onClick={() => requireAdmin(() => openManualEntry(currentSong, '', 'editor'))} className="px-4 py-2.5 bg-slate-50 border rounded-xl text-sm font-bold flex items-center gap-2 transition hover:bg-slate-100 text-slate-700"><Database size={16} className="text-sky-500"/> 編輯詩歌檔案</button></div>
-                  <h3 className="text-[11px] font-bold text-slate-400 mb-4 border-b pb-2 uppercase tracking-widest">歌詞預覽</h3>
-                  <div className="space-y-6 max-h-[450px] overflow-y-auto pr-2 custom-scrollbar">
-                    {currentSong.lyrics?.map((s, i) => (<div key={i} className="mb-4"><span onClick={() => handleAppendTag(s.section)} title={TAG_EXPLANATIONS[s.section]} className="inline-block px-2 py-0.5 bg-slate-100 text-slate-700 font-mono text-[10px] font-bold rounded shadow-sm cursor-pointer hover:bg-sky-500 hover:text-white transition mb-2">{s.section}</span><p className="text-[14px] text-slate-700 leading-relaxed whitespace-pre-wrap">{s.text}</p></div>))}
+              <div className="p-5 sm:p-8 grid grid-cols-1 lg:grid-cols-2 gap-8 sm:gap-12 bg-white">
+                <div className="order-2 lg:order-1">
+                  <div className="flex flex-wrap gap-2 sm:gap-3 mb-6 sm:mb-8">
+                    <a href={currentSong.youtubeId ? `https://youtu.be/${currentSong.youtubeId}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(currentSong.title)}`} target="_blank" rel="noopener noreferrer" className="flex-1 sm:flex-none justify-center px-3 sm:px-4 py-2 sm:py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 transition hover:bg-red-100"><Youtube size={16}/> YouTube 聆聽</a>
+                    <button onClick={() => requireAdmin(() => openManualEntry(currentSong, '', 'editor'))} className="flex-1 sm:flex-none justify-center px-3 sm:px-4 py-2 sm:py-2.5 bg-slate-50 border rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 transition hover:bg-slate-100 text-slate-700"><Database size={16} className="text-sky-500"/> 編輯詩歌檔案</button>
+                  </div>
+                  <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 mb-3 sm:mb-4 border-b pb-2 uppercase tracking-widest">歌詞預覽</h3>
+                  <div className="space-y-4 sm:space-y-6 max-h-[350px] sm:max-h-[450px] overflow-y-auto pr-2 custom-scrollbar">
+                    {currentSong.lyrics?.map((s, i) => (<div key={i} className="mb-3 sm:mb-4"><span onClick={() => handleAppendTag(s.section)} title={TAG_EXPLANATIONS[s.section]} className="inline-block px-1.5 sm:px-2 py-0.5 bg-slate-100 text-slate-700 font-mono text-[9px] sm:text-[10px] font-bold rounded shadow-sm cursor-pointer hover:bg-sky-500 hover:text-white transition mb-1.5 sm:mb-2">{s.section}</span><p className="text-xs sm:text-[14px] text-slate-700 leading-relaxed whitespace-pre-wrap">{s.text}</p></div>))}
                   </div>
                 </div>
-                <div className="bg-[#FAFAFA] p-6 border rounded-2xl shadow-sm h-fit">
-                  <h3 className="text-[11px] font-bold text-slate-400 mb-4 border-b pb-2 uppercase tracking-widest">建立段落 (Map Builder)</h3>
-                  <div className="flex flex-wrap gap-2 mb-6">{SONG_MAP_TAGS.map(tag => { const isAvail = STRUCTURAL_TAGS.includes(tag) || currentSong.lyrics?.some(l => l.section === tag); return (<button key={tag} onClick={() => isAvail && handleAppendTag(tag)} disabled={!isAvail} title={TAG_EXPLANATIONS[tag]} className={`px-3 py-1.5 font-mono text-sm border rounded-lg transition ${isAvail ? 'bg-white text-slate-700 hover:border-sky-500 shadow-sm cursor-pointer' : 'bg-slate-50 text-slate-300 cursor-not-allowed opacity-60'}`}>{tag}</button>); })}</div>
-                  <div className="mb-8"><label className="text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">編輯字串 (Map String)</label><textarea value={currentMap} onChange={e => setCurrentMap(e.target.value)} rows={4} className="w-full border rounded-xl p-4 bg-white font-mono shadow-sm outline-none focus:border-sky-500 transition text-blue-600 font-bold" placeholder="例如：I-V1-C-V2-C-B-C-E" /></div>
-                  <button onClick={saveToSetlist} disabled={!currentMap.trim()} className="w-full py-4 bg-sky-500 hover:bg-sky-600 text-white font-serif rounded-xl shadow-lg transition active:scale-[0.98] disabled:opacity-50">確認加入歌單</button>
+                <div className="bg-[#FAFAFA] p-5 sm:p-6 border rounded-2xl shadow-sm h-fit order-1 lg:order-2">
+                  <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 mb-3 sm:mb-4 border-b pb-2 uppercase tracking-widest">建立段落 (Map Builder)</h3>
+                  <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-5 sm:mb-6">{SONG_MAP_TAGS.map(tag => { const isAvail = STRUCTURAL_TAGS.includes(tag) || currentSong.lyrics?.some(l => l.section === tag); return (<button key={tag} onClick={() => isAvail && handleAppendTag(tag)} disabled={!isAvail} title={TAG_EXPLANATIONS[tag]} className={`px-2.5 sm:px-3 py-1 sm:py-1.5 font-mono text-xs sm:text-sm border rounded-lg transition ${isAvail ? 'bg-white text-slate-700 hover:border-sky-500 shadow-sm cursor-pointer' : 'bg-slate-50 text-slate-300 cursor-not-allowed opacity-60'}`}>{tag}</button>); })}</div>
+                  <div className="mb-6 sm:mb-8"><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1.5 sm:mb-2 uppercase tracking-widest">編輯字串 (Map String)</label><textarea value={currentMap} onChange={e => setCurrentMap(e.target.value)} rows={3} className="w-full border rounded-xl p-3 sm:p-4 bg-white font-mono shadow-sm outline-none focus:border-sky-500 transition text-blue-600 font-bold text-sm sm:text-base" placeholder="例如：I-V1-C-V2-C-B-C-E" /></div>
+                  <button onClick={saveToSetlist} disabled={!currentMap.trim()} className="w-full py-3 sm:py-4 bg-sky-500 hover:bg-sky-600 text-white font-serif rounded-xl shadow-lg transition active:scale-[0.98] disabled:opacity-50 text-sm sm:text-base">確認加入歌單</button>
                 </div>
               </div>
             ) : (
-              <div className="p-8 bg-slate-50/50">
-                <h3 className="text-[11px] font-bold text-slate-400 mb-4 border-b pb-2 uppercase tracking-widest flex justify-between items-end">
+              <div className="p-5 sm:p-8 bg-slate-50/50">
+                <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 mb-3 sm:mb-4 border-b pb-2 uppercase tracking-widest flex flex-col sm:flex-row justify-between items-start sm:items-end gap-2">
                   <span>{searchQuery ? '搜尋結果' : '瀏覽雲端詩歌庫 (全庫)'}</span>
                   {!searchQuery && <span className="text-[9px] font-normal flex items-center gap-1 text-slate-400 bg-white border border-slate-200 shadow-sm px-2 py-0.5 rounded-full"><Crown size={10} className="text-orange-400"/> 依近3個月熱度排序</span>}
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar pb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 max-h-[400px] sm:max-h-[500px] overflow-y-auto pr-2 custom-scrollbar pb-4">
                   {displaySongs.map((s, index) => (
-                    <div key={s.id} onClick={() => handleSelectSong(s)} className="bg-white border border-slate-200 rounded-2xl p-5 cursor-pointer hover:border-sky-400 hover:shadow-lg transition-all group flex flex-col justify-between relative overflow-hidden">
+                    <div key={s.id} onClick={() => handleSelectSong(s)} className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 cursor-pointer hover:border-sky-400 hover:shadow-lg transition-all group flex flex-col justify-between relative overflow-hidden">
                       
-                      {/* Top 3 會有特殊皇冠或熱門標記 */}
                       {s.stats.count3Months > 0 && index < 3 && !searchQuery && (
-                        <div className="absolute top-0 right-0 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[9px] font-bold px-3 py-1 rounded-bl-xl shadow-sm flex items-center gap-1">
+                        <div className="absolute top-0 right-0 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[8px] sm:text-[9px] font-bold px-2.5 sm:px-3 py-1 rounded-bl-xl shadow-sm flex items-center gap-1">
                           <Crown size={10} /> 推薦熱門
                         </div>
                       )}
 
                       <div>
-                        <h4 className="font-serif font-bold text-slate-800 text-[17px] group-hover:text-sky-600 mb-1 leading-tight pr-14">{s.title}</h4>
-                        <p className="text-[11px] text-slate-400 uppercase tracking-widest mb-4">{s.artist || '未知歌手'}</p>
+                        <h4 className="font-serif font-bold text-slate-800 text-[15px] sm:text-[17px] group-hover:text-sky-600 mb-1 leading-tight pr-12 sm:pr-14 truncate">{s.title}</h4>
+                        <p className="text-[10px] sm:text-[11px] text-slate-400 uppercase tracking-widest mb-3 sm:mb-4 truncate">{s.artist || '未知歌手'}</p>
                       </div>
                       
-                      <div className="flex flex-col gap-2.5 mt-1">
+                      <div className="flex flex-col gap-2 sm:gap-2.5 mt-1">
                         <div className="flex flex-wrap gap-1.5">
                           {s.stats.count3Months > 0 ? (
-                            <span className="bg-red-50 text-red-600 text-[10px] px-2 py-1 rounded-md font-bold border border-red-100 flex items-center gap-1">
+                            <span className="bg-red-50 text-red-600 text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-1 rounded-md font-bold border border-red-100 flex items-center gap-1">
                               🔥 近三月: {s.stats.count3Months} 次
                             </span>
                           ) : (
-                            <span className="bg-slate-50 text-slate-400 text-[10px] px-2 py-1 rounded-md font-medium border border-slate-100 flex items-center gap-1">
+                            <span className="bg-slate-50 text-slate-400 text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-1 rounded-md font-medium border border-slate-100 flex items-center gap-1">
                               ❄️ 近期未唱
                             </span>
                           )}
                           {s.stats.weeksAgo !== null && (
-                            <span className="bg-sky-50 text-sky-600 text-[10px] px-2 py-1 rounded-md font-bold border border-sky-100 flex items-center gap-1">
+                            <span className="bg-sky-50 text-sky-600 text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-1 rounded-md font-bold border border-sky-100 flex items-center gap-1">
                               🕒 {s.stats.weeksAgo === 0 ? '本週剛唱' : `${s.stats.weeksAgo} 週前`}
                             </span>
                           )}
                         </div>
 
-                        <div className="flex justify-between items-end pt-3 border-t border-slate-50 mt-1">
-                          <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1"><Music size={12}/> {s.lyrics?.length || 0} 段落</span>
-                          <span className="font-mono text-xs font-bold text-sky-600 bg-sky-50 px-2.5 py-1 rounded-lg border border-sky-100">{s.defaultKey || 'C'}</span>
+                        <div className="flex justify-between items-end pt-2 sm:pt-3 border-t border-slate-50 mt-1">
+                          <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 flex items-center gap-1"><Music size={12}/> {s.lyrics?.length || 0} 段落</span>
+                          <span className="font-mono text-[10px] sm:text-xs font-bold text-sky-600 bg-sky-50 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg border border-sky-100">{s.defaultKey || 'C'}</span>
                         </div>
                       </div>
                     </div>
                   ))}
                   {displaySongs.length === 0 && (
-                    <div className="col-span-full py-16 text-center bg-white border border-slate-100 rounded-xl shadow-sm">
-                      <div className="text-4xl mb-3">🥺</div>
-                      <p className="mb-1 text-sm text-slate-600 font-bold">雲端資料庫查無此歌</p>
-                      <p className="text-xs text-slate-400">請點擊上方按鈕使用手動新增</p>
+                    <div className="col-span-full py-12 sm:py-16 text-center bg-white border border-slate-100 rounded-xl shadow-sm">
+                      <div className="text-3xl sm:text-4xl mb-2 sm:mb-3">🥺</div>
+                      <p className="mb-1 text-xs sm:text-sm text-slate-600 font-bold">雲端資料庫查無此歌</p>
+                      <p className="text-[10px] sm:text-xs text-slate-400">請點擊上方按鈕使用手動新增</p>
                     </div>
                   )}
                 </div>
@@ -713,68 +758,143 @@ export default function App() {
       )}
 
       {view === 'manual' && (
-        <div className="pb-20 max-w-4xl mx-auto p-4 sm:p-8 pt-4">
-          <header className="mb-8 border-b pb-6 flex justify-between items-center"><button onClick={() => setView(manualSource)} className="flex items-center gap-2 text-slate-500 transition hover:text-slate-900 font-medium"><ChevronLeft size={18}/> 返回</button><div className="font-serif tracking-widest font-bold uppercase text-slate-700">詩歌編輯器</div></header>
-          <div className="bg-white border rounded-2xl p-8 shadow-sm">
-            <h2 className="text-2xl font-serif font-bold text-slate-900 mb-8 flex items-center gap-2">{editingDbSongId ? '編輯詩歌檔案' : '新增詩歌資料庫'}</h2>
+        <div className="pb-20 max-w-4xl mx-auto p-4 sm:p-8 pt-4 w-full">
+          <header className="mb-6 sm:mb-8 border-b pb-4 sm:pb-6 flex justify-between items-center"><button onClick={() => setView(manualSource)} className="flex items-center gap-1 sm:gap-2 text-slate-500 transition hover:text-slate-900 font-medium text-sm sm:text-base"><ChevronLeft size={18}/> 返回</button><div className="font-serif tracking-widest font-bold uppercase text-slate-700 text-xs sm:text-sm">詩歌編輯器</div></header>
+          <div className="bg-white border rounded-2xl p-5 sm:p-8 shadow-sm">
+            <h2 className="text-xl sm:text-2xl font-serif font-bold text-slate-900 mb-6 sm:mb-8 flex items-center gap-2">{editingDbSongId ? '編輯詩歌檔案' : '新增詩歌資料庫'}</h2>
             
-            {/* 顯示儲存錯誤訊息 */}
             {saveError && (
-              <div className="mb-8 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm font-bold flex items-center gap-2">
-                <X size={16} /> {saveError}
+              <div className="mb-6 sm:mb-8 p-3 sm:p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-xs sm:text-sm font-bold flex items-center gap-2">
+                <X size={16} className="shrink-0"/> {saveError}
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
-              <div><label className="text-[11px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">歌名 *</label><input type="text" value={customTitle} onChange={e => setCustomTitle(e.target.value)} className="w-full border-b-2 bg-transparent focus:border-sky-500 p-2 font-serif text-lg outline-none transition" /></div>
-              <div><label className="text-[11px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">歌手 / 出處</label><input type="text" value={customArtist} onChange={e => setCustomArtist(e.target.value)} className="w-full border-b-2 bg-transparent focus:border-sky-500 p-2 outline-none transition" /></div>
-              <div><label className="text-[11px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">預設調性</label><select value={customKey} onChange={e => setCustomKey(e.target.value)} className="w-full border-b-2 bg-transparent p-2 transition outline-none focus:border-sky-500">{KEYS.map(k => <option key={k} value={k}>{k}</option>)}</select></div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-8 mb-6 sm:mb-8">
+              <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">歌名 *</label><input type="text" value={customTitle} onChange={e => setCustomTitle(e.target.value)} className="w-full border-b-2 bg-transparent focus:border-sky-500 p-2 font-serif text-base sm:text-lg outline-none transition" /></div>
+              <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">歌手 / 出處</label><input type="text" value={customArtist} onChange={e => setCustomArtist(e.target.value)} className="w-full border-b-2 bg-transparent focus:border-sky-500 p-2 outline-none transition text-sm sm:text-base" /></div>
+              <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">預設調性</label><select value={customKey} onChange={e => setCustomKey(e.target.value)} className="w-full border-b-2 bg-transparent p-2 transition outline-none focus:border-sky-500 text-sm sm:text-base">{KEYS.map(k => <option key={k} value={k}>{k}</option>)}</select></div>
             </div>
-            <div className="mb-10"><label className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1 uppercase tracking-widest"><Youtube size={14} className="text-red-500"/> YouTube 連結或 ID (必填)</label><input type="text" value={customYoutubeUrl} onChange={e => setCustomYoutubeUrl(e.target.value)} className="w-full border-b-2 bg-transparent p-2 text-sm outline-none transition focus:border-sky-500" placeholder="https://youtu.be/..." /></div>
-            <div className="mb-10"><div className="flex justify-between items-end border-b pb-2 mb-8"><h3 className="text-[11px] font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest">歌詞段落管理</h3></div><div className="space-y-6">{customLyrics.map((l, i) => (<div key={i} className="flex gap-5 items-start group transition hover:bg-slate-50/50 p-3 rounded-xl border border-transparent hover:border-slate-100"><div className="shrink-0"><select value={l.section} onChange={e => { const nl = [...customLyrics]; nl[i].section = e.target.value; setCustomLyrics(nl); }} className="w-24 p-2 border rounded-lg font-mono text-sm shadow-sm bg-white focus:border-sky-500 outline-none">{SONG_MAP_TAGS.map(t => <option key={t} value={t}>{t}</option>)}</select><div className="text-[9px] text-slate-400 mt-1 font-mono text-center">{TAG_EXPLANATIONS[l.section]?.split(' ')[0]}</div></div><textarea value={l.text} onChange={e => { const nl = [...customLyrics]; nl[i].text = e.target.value; setCustomLyrics(nl); }} rows={3} className="flex-1 p-4 border rounded-xl font-sans text-sm shadow-sm outline-none focus:border-sky-500 transition" placeholder="在此貼上歌詞內容..." /><button onClick={() => { const nl = [...customLyrics]; nl.splice(i, 1); setCustomLyrics(nl); }} className="p-2 text-slate-200 hover:text-red-600 transition self-center"><Trash2 size={20}/></button></div>))}</div><button onClick={() => setCustomLyrics([...customLyrics, { section: 'V', text: '' }])} className="mt-8 flex items-center gap-1.5 text-xs font-bold uppercase text-sky-600 transition hover:text-sky-500">+ 新增段落</button></div>
-            <div className="flex justify-end pt-8 border-t"><button onClick={handleSaveCustomSong} disabled={!customTitle.trim() || isSaving} className="px-12 py-4 bg-sky-500 hover:bg-sky-600 text-white font-serif rounded-xl shadow-xl transition active:scale-95 disabled:opacity-30 tracking-widest font-bold">{isSaving ? '儲存中...' : (editingDbSongId ? '確認儲存更新' : '確認儲存至雲端資料庫')}</button></div>
+            <div className="mb-8 sm:mb-10"><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1 uppercase tracking-widest"><Youtube size={14} className="text-red-500"/> YouTube 連結或 ID (必填)</label><input type="text" value={customYoutubeUrl} onChange={e => setCustomYoutubeUrl(e.target.value)} className="w-full border-b-2 bg-transparent p-2 text-xs sm:text-sm outline-none transition focus:border-sky-500" placeholder="https://youtu.be/..." /></div>
+            <div className="mb-8 sm:mb-10"><div className="flex justify-between items-end border-b pb-2 mb-6 sm:mb-8"><h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest">歌詞段落管理</h3></div><div className="space-y-4 sm:space-y-6">{customLyrics.map((l, i) => (<div key={i} className="flex flex-col sm:flex-row gap-3 sm:gap-5 items-start group transition hover:bg-slate-50/50 p-3 rounded-xl border border-transparent hover:border-slate-100"><div className="w-full sm:w-auto shrink-0 flex sm:block justify-between items-center"><select value={l.section} onChange={e => { const nl = [...customLyrics]; nl[i].section = e.target.value; setCustomLyrics(nl); }} className="w-20 sm:w-24 p-1.5 sm:p-2 border rounded-lg font-mono text-xs sm:text-sm shadow-sm bg-white focus:border-sky-500 outline-none">{SONG_MAP_TAGS.map(t => <option key={t} value={t}>{t}</option>)}</select><div className="text-[9px] text-slate-400 mt-1 font-mono hidden sm:block text-center">{TAG_EXPLANATIONS[l.section]?.split(' ')[0]}</div><button onClick={() => { const nl = [...customLyrics]; nl.splice(i, 1); setCustomLyrics(nl); }} className="sm:hidden p-1.5 text-slate-300 hover:text-red-600 transition bg-white border rounded shadow-sm"><Trash2 size={16}/></button></div><textarea value={l.text} onChange={e => { const nl = [...customLyrics]; nl[i].text = e.target.value; setCustomLyrics(nl); }} rows={3} className="w-full flex-1 p-3 sm:p-4 border rounded-xl font-sans text-sm shadow-sm outline-none focus:border-sky-500 transition" placeholder="在此貼上歌詞內容..." /><button onClick={() => { const nl = [...customLyrics]; nl.splice(i, 1); setCustomLyrics(nl); }} className="hidden sm:block p-2 text-slate-200 hover:text-red-600 transition self-center"><Trash2 size={20}/></button></div>))}</div><button onClick={() => setCustomLyrics([...customLyrics, { section: 'V', text: '' }])} className="mt-6 sm:mt-8 flex items-center gap-1.5 text-xs font-bold uppercase text-sky-600 transition hover:text-sky-500 bg-sky-50 px-4 py-2 rounded-lg w-fit">+ 新增段落</button></div>
+            <div className="flex justify-end pt-6 sm:pt-8 border-t"><button onClick={handleSaveCustomSong} disabled={!customTitle.trim() || isSaving} className="w-full sm:w-auto px-8 sm:px-12 py-3.5 sm:py-4 bg-sky-500 hover:bg-sky-600 text-white font-serif rounded-xl shadow-xl transition active:scale-95 disabled:opacity-30 tracking-widest font-bold text-sm sm:text-base">{isSaving ? '儲存中...' : (editingDbSongId ? '確認儲存更新' : '確認儲存至雲端資料庫')}</button></div>
           </div>
         </div>
       )}
 
       {view === 'manage' && (
-        <div className="pb-20 max-w-5xl mx-auto p-4 sm:p-8 pt-4">
+        <div className="pb-20 max-w-6xl mx-auto p-4 sm:p-8 pt-4 w-full">
           <ConfirmModal isOpen={deleteConfirmId !== null} title="永久刪除？" message="此動作將移除雲端檔案，無法復原。" onCancel={() => setDeleteConfirmId(null)} onConfirm={() => executeDeleteDbSong(deleteConfirmId)} />
-          <header className="mb-8 border-b pb-6 flex justify-between items-center"><button onClick={() => setView('home')} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition font-medium"><ChevronLeft size={18}/> 返回</button><div className="font-serif tracking-widest text-slate-900 uppercase font-bold flex items-center gap-2"><Database size={16} className="text-sky-500" /> 詩歌庫管理系統</div></header>
-          <div className="bg-white border p-6 rounded-2xl mb-8 flex flex-col md:flex-row gap-4 shadow-sm items-center">
-            <div className="relative flex-1 w-full"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4"/><input type="text" value={librarySearch} onChange={e => setLibrarySearch(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border rounded-xl bg-slate-50 focus:bg-white focus:ring-1 focus:ring-sky-500 outline-none transition" placeholder="搜尋雲端詩歌檔案..." /></div>
+          <header className="mb-6 sm:mb-8 border-b pb-4 sm:pb-6 flex justify-between items-center"><button onClick={() => setView('home')} className="flex items-center gap-1 sm:gap-2 text-slate-500 hover:text-slate-900 transition font-medium text-sm sm:text-base"><ChevronLeft size={18}/> 返回</button><div className="font-serif tracking-widest text-slate-900 uppercase font-bold flex items-center gap-1 sm:gap-2 text-xs sm:text-base"><Database size={16} className="text-sky-500 hidden sm:block" /> 詩歌庫管理</div></header>
+          <div className="bg-white border p-4 sm:p-6 rounded-2xl mb-6 sm:mb-8 flex flex-col md:flex-row gap-3 sm:gap-4 shadow-sm items-center">
+            <div className="relative flex-1 w-full"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4"/><input type="text" value={librarySearch} onChange={e => setLibrarySearch(e.target.value)} className="w-full pl-9 sm:pl-10 pr-4 py-2 sm:py-2.5 border rounded-xl bg-slate-50 focus:bg-white focus:ring-1 focus:ring-sky-500 outline-none transition text-sm sm:text-base" placeholder="搜尋雲端詩歌檔案..." /></div>
             <div className="flex gap-2 w-full md:w-auto relative" ref={addDropdownRef}>
-              <button onClick={() => requireAdmin(() => setShowAddDropdown(!showAddDropdown))} className="bg-sky-500 hover:bg-sky-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-md transition flex items-center gap-2">
+              <button onClick={() => requireAdmin(() => setShowAddDropdown(!showAddDropdown))} className="w-full md:w-auto justify-center bg-sky-500 hover:bg-sky-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-md transition flex items-center gap-2">
                 <Plus size={16}/> 新增詩歌
               </button>
               {showAddDropdown && (
-                <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-slate-100 shadow-xl rounded-xl overflow-hidden z-20 flex flex-col">
-                  {/* 按鈕改為呼叫 showComingSoonModal */}
+                <div className="absolute top-full right-0 mt-2 w-full sm:w-48 bg-white border border-slate-100 shadow-xl rounded-xl overflow-hidden z-20 flex flex-col">
                   <button onClick={() => { setShowAddDropdown(false); requireAdmin(() => setShowComingSoonModal(true)); }} className="text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 text-slate-700 transition border-b border-slate-50"><Sparkles size={14} className="text-sky-500"/> AI 歌詞抓取</button>
                   <button onClick={() => { setShowAddDropdown(false); requireAdmin(() => openManualEntry(null, '', 'manage')); }} className="text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 text-slate-700 transition"><Edit2 size={14} className="text-slate-400"/> 手動新增檔案</button>
                 </div>
               )}
             </div>
           </div>
-          <div className="bg-white border rounded-2xl shadow-sm overflow-hidden overflow-x-auto"><table className="w-full text-left"><thead><tr className="bg-slate-50 border-b text-slate-500 text-[10px] uppercase tracking-widest font-bold"><th className="p-4">歌名 (Song Title)</th><th className="p-4">歌手 / 出處</th><th className="p-4">預設調性</th><th className="p-4 text-right">管理操作</th></tr></thead><tbody className="divide-y divide-slate-50">{songsDb.filter(s => (s.title||'').toLowerCase().includes(librarySearch.toLowerCase()) || (s.artist||'').toLowerCase().includes(librarySearch.toLowerCase())).map(s => (<tr key={s.id} className="hover:bg-slate-50 transition group"><td className="p-4 font-serif font-bold text-slate-800 text-lg group-hover:text-sky-600">{s.title}</td><td className="p-4 text-sm text-slate-500">{s.artist || '-'}</td><td className="p-4 font-mono text-sm text-slate-400">{s.defaultKey}</td><td className="p-4 text-right"><div className="flex justify-end gap-1"><button onClick={() => requireAdmin(() => openManualEntry(s, '', 'manage'))} className="p-2.5 hover:bg-white rounded-lg text-slate-400 hover:text-sky-600 transition shadow-sm border border-transparent hover:border-slate-100"><Edit2 size={16}/></button><button onClick={() => requireAdmin(() => setDeleteConfirmId(s.id))} className="p-2.5 hover:bg-white rounded-lg text-slate-300 hover:text-red-600 transition border border-transparent hover:border-red-50"><Trash2 size={16}/></button></div></td></tr>))}</tbody></table></div>
+          <div className="bg-white border rounded-2xl shadow-sm overflow-hidden overflow-x-auto w-full">
+            <table className="w-full text-left min-w-[600px]">
+              <thead>
+                <tr className="bg-slate-50 border-b text-slate-500 text-[9px] sm:text-[10px] uppercase tracking-widest font-bold">
+                  <th className="p-3 sm:p-4">歌名 (Song Title)</th>
+                  <th className="p-3 sm:p-4">歌手 / 出處</th>
+                  <th className="p-3 sm:p-4">近期熱度</th>
+                  <th className="p-3 sm:p-4">預設調性</th>
+                  <th className="p-3 sm:p-4 text-right">管理操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {libraryDisplaySongs.map((s, index) => (
+                  <tr key={s.id} className="hover:bg-slate-50 transition group">
+                    <td className="p-3 sm:p-4">
+                      <div className="flex flex-col items-start gap-1">
+                        {s.stats.count3Months > 0 && index < 3 && !librarySearch && (
+                          <span className="bg-gradient-to-r from-orange-400 to-red-500 text-white text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded shadow-sm flex items-center gap-1 w-fit font-bold">
+                            <Crown size={10} /> 推薦熱門
+                          </span>
+                        )}
+                        <span className="font-serif font-bold text-slate-800 text-sm sm:text-lg group-hover:text-sky-600 whitespace-nowrap sm:whitespace-normal">{s.title}</span>
+                      </div>
+                    </td>
+                    <td className="p-3 sm:p-4 text-xs sm:text-sm text-slate-500">{s.artist || '-'}</td>
+                    <td className="p-3 sm:p-4">
+                      <div className="flex flex-col gap-1.5 items-start">
+                        {s.stats.count3Months > 0 ? (
+                          <span className="bg-red-50 text-red-600 text-[9px] sm:text-[10px] px-2 py-1 rounded-md font-bold border border-red-100 flex items-center gap-1 w-fit whitespace-nowrap">
+                            🔥 近三月: {s.stats.count3Months} 次
+                          </span>
+                        ) : (
+                          <span className="bg-slate-50 text-slate-400 text-[9px] sm:text-[10px] px-2 py-1 rounded-md font-medium border border-slate-100 flex items-center gap-1 w-fit whitespace-nowrap">
+                            ❄️ 近期未唱
+                          </span>
+                        )}
+                        {s.stats.weeksAgo !== null && (
+                          <span className="bg-sky-50 text-sky-600 text-[9px] sm:text-[10px] px-2 py-1 rounded-md font-bold border border-sky-100 flex items-center gap-1 w-fit whitespace-nowrap">
+                            🕒 {s.stats.weeksAgo === 0 ? '本週剛唱' : `${s.stats.weeksAgo} 週前`}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-3 sm:p-4 font-mono text-xs sm:text-sm text-slate-400">{s.defaultKey}</td>
+                    <td className="p-3 sm:p-4 text-right whitespace-nowrap">
+                      <div className="flex justify-end gap-1">
+                        <button onClick={() => requireAdmin(() => openManualEntry(s, '', 'manage'))} className="p-2 sm:p-2.5 hover:bg-white rounded-lg text-slate-400 hover:text-sky-600 transition shadow-sm border border-transparent hover:border-slate-100"><Edit2 size={16}/></button>
+                        <button onClick={() => requireAdmin(() => setDeleteConfirmId(s.id))} className="p-2 sm:p-2.5 hover:bg-white rounded-lg text-slate-300 hover:text-red-600 transition border border-transparent hover:border-red-50"><Trash2 size={16}/></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {view === 'preview' && (
         <div className="min-h-screen flex flex-col bg-slate-200">
-          <header className="bg-white/90 backdrop-blur-md border-b px-6 py-4 flex justify-between items-center sticky top-0 z-50 shadow-sm"><button onClick={() => setView(previewSource)} className="flex items-center gap-2 font-medium hover:text-slate-900 transition text-slate-500"><ChevronLeft size={20}/> 返回前頁</button><span className="font-serif font-bold flex items-center gap-2 text-slate-800 text-lg"><Eye size={18} className="text-[#C4A977]"/> 敬拜歌單預覽 (US Letter)</span><button onClick={handleExportPDF} disabled={isGenerating} className="px-6 py-2 bg-sky-500 hover:bg-sky-600 text-white rounded-lg font-bold shadow-lg transition active:scale-95 disabled:opacity-50">{isGenerating ? '正在產生 PDF...' : '立即下載 PDF'} <Download size={16}/></button></header>
+          <header className="bg-white/90 backdrop-blur-md border-b px-4 sm:px-6 py-3 sm:py-4 flex flex-row flex-wrap sm:flex-nowrap justify-between items-center sticky top-0 z-50 shadow-sm gap-2 sm:gap-0">
+            <button onClick={() => setView(previewSource)} className="flex items-center gap-1 sm:gap-2 font-medium hover:text-slate-900 transition text-slate-500 text-xs sm:text-base"><ChevronLeft size={18}/> 返回</button>
+            <span className="font-serif font-bold flex items-center gap-1.5 sm:gap-2 text-slate-800 text-sm sm:text-lg"><Eye size={16} className="text-[#C4A977]"/> 預覽與輸出</span>
+            <button onClick={handleExportPDF} disabled={isGenerating} className="px-3 sm:px-6 py-1.5 sm:py-2 bg-sky-500 hover:bg-sky-600 text-white rounded-lg font-bold shadow-lg transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5 text-xs sm:text-base">{isGenerating ? '產生中...' : '下載 PDF'} <Download size={14} className="sm:w-4 sm:h-4"/></button>
+          </header>
           
-          {/* 將列印區域直接顯示在畫面中，確保 HTML2PDF 能 100% 抓取樣式 */}
-          <main className="flex-1 overflow-y-auto p-8 flex justify-center pb-24">
-            <div id="pdf-print-area" className="bg-white shadow-2xl relative overflow-hidden">
-              <PrintLayoutContent meta={meta} setlist={setlist} />
+          <main className="flex-1 overflow-auto p-2 sm:p-8 flex items-start justify-start md:justify-center pb-24 w-full custom-scrollbar">
+            <div className="w-fit shrink-0">
+              <div id="pdf-print-area" className="bg-white shadow-2xl relative overflow-hidden">
+                <PrintLayoutContent meta={meta} setlist={setlist} />
+              </div>
             </div>
           </main>
         </div>
       )}
 
+      {/* Global Footer */}
+      {view !== 'preview' && (
+        <footer className="mt-auto bg-white border-t border-slate-200 pt-8 sm:pt-10 pb-10 sm:pb-12 z-10 w-full">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 text-center flex flex-col items-center">
+            <p className="text-[10px] sm:text-xs font-bold text-slate-700 mb-2 sm:mb-3">© 2026 Irvine City Church. All Rights Reserved.</p>
+            <p className="text-[10px] sm:text-[11px] text-slate-500 leading-relaxed mb-2 max-w-2xl px-2">
+              本站收錄之詩歌歌詞僅供爾灣城市教會（Irvine City Church）家人內部敬拜、練習與靈修使用。<br className="hidden sm:block"/>所有歌曲與歌詞之版權均歸原創作者及發行機構所有，感謝這些美好的創作豐富了我們的敬拜。
+            </p>
+            <p className="text-[9px] sm:text-[10px] text-slate-400 font-serif italic leading-relaxed mb-4 sm:mb-6 max-w-2xl px-2">
+              This site is for internal worship use at Irvine City Church only.<br className="hidden sm:block"/>All lyrics and music copyrights belong to their respective original authors.
+            </p>
+            <a href="https://www.irvinecitychurch.com" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center px-5 sm:px-6 py-2 sm:py-2.5 bg-slate-900 text-white text-[10px] sm:text-[11px] font-bold uppercase tracking-widest rounded-full hover:bg-sky-600 transition shadow-md">
+              Contact Us
+            </a>
+          </div>
+        </footer>
+      )}
+
       <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
         input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.6; }
       `}</style>
@@ -786,45 +906,49 @@ export default function App() {
 // PDF / Print Layout Content (重新設計的高質感版面)
 // -----------------------------------------------------------------------------
 const PrintLayoutContent = ({ meta, setlist }) => (
-  <div className="bg-white text-slate-900 w-[816px] min-h-[1056px] mx-auto box-border p-[48px] flex flex-col font-sans">
+  <div className="bg-white text-slate-900 w-[816px] min-h-[1056px] mx-auto box-border p-[40px] flex flex-col font-sans shrink-0">
     
-    {/* Modern Header */}
-    <div className="flex justify-between items-end border-b-4 border-slate-900 pb-4 mb-6 mt-2">
-      <div>
-        <h1 className="text-4xl font-serif font-black tracking-widest text-slate-900 mb-1">WORSHIP MAP</h1>
-        <p className="text-base font-bold text-slate-500 tracking-[0.2em] uppercase">{meta.date?.replace(/-/g, '/') || 'YYYY / MM / DD'}</p>
+    {/* Modern Header - Smaller & Styled */}
+    <div className="flex justify-between items-end border-b-[3px] border-slate-900 pb-3 mb-4 mt-0">
+      <div className="flex flex-col gap-1.5">
+        <h1 className="text-[26px] font-serif font-black tracking-widest text-slate-900 uppercase leading-none m-0">ICC Worship Song Map</h1>
+        <div className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded shadow-sm w-fit">
+          <CalendarDays size={12} className="text-sky-500" />
+          <span className="text-[11px] font-bold tracking-[0.15em] font-mono leading-none pt-[1px]">
+            {meta.date?.replace(/-/g, '/') || 'YYYY / MM / DD'}
+          </span>
+        </div>
       </div>
-      <div className="text-right">
-        <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400 mb-1">Worship Leader</p>
-        <p className="text-xl font-serif font-bold text-slate-800">{meta.wl || '未指定'}</p>
+      <div className="text-right flex flex-col items-end gap-1">
+        <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Worship Leader</span>
+        <span className="text-[15px] font-serif font-bold text-slate-800 leading-none">{meta.wl || '未指定'}</span>
       </div>
     </div>
 
     {/* Highlighted Song Map Section (優化壓縮為 Grid 排版) */}
-    <div className="mb-6 bg-slate-50 rounded-xl p-5 border border-slate-200">
-      <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3 border-b border-slate-200 pb-1.5">Setlist Overview</h3>
-      <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+    <div className="mb-5 bg-slate-50 rounded-lg p-3.5 border border-slate-200">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
         {setlist.map((item, idx) => (
-          <div key={idx} className="flex gap-3 items-start">
-            <div className="w-6 h-6 shrink-0 bg-slate-900 text-white rounded-full flex items-center justify-center font-bold font-serif text-[11px] mt-0.5 shadow-sm">
+          <div key={idx} className="flex gap-2 items-start">
+            <div className="w-[18px] h-[18px] shrink-0 bg-slate-900 text-white rounded-[4px] flex items-center justify-center font-bold font-serif text-[9px] mt-[1px] shadow-sm">
               {idx + 1}
             </div>
             <div className="flex-1 overflow-hidden">
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className="font-bold text-[14px] font-serif leading-none truncate">{item.title}</span>
-                <span className="text-[9px] font-mono font-bold text-sky-600 bg-sky-50 px-1.5 py-[2px] rounded border border-sky-100 leading-none shrink-0">{item.key}</span>
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="font-bold text-[13px] font-serif leading-none truncate">{item.title}</span>
+                <span className="text-[8px] font-mono font-bold text-sky-600 bg-sky-100/80 px-1 py-[1px] rounded leading-none shrink-0 border border-sky-200">{item.key}</span>
               </div>
-              <div className="flex flex-wrap gap-1 items-center">
+              <div className="flex flex-wrap gap-0.5 items-center">
                 {item.mapString ? item.mapString.split('-').map((tag, tIdx) => (
                   <div key={tIdx} className="flex items-center">
-                    <span className="inline-flex items-center justify-center px-1.5 py-[2px] bg-white border border-slate-300 text-slate-700 text-[9px] font-bold font-mono rounded shadow-sm">
+                    <span className="inline-flex items-center justify-center px-1.5 py-[2px] bg-white border border-slate-300 text-slate-600 text-[8px] font-bold font-mono rounded-[3px] shadow-sm">
                       {tag}
                     </span>
                     {tIdx < item.mapString.split('-').length - 1 && (
-                      <span className="text-slate-300 mx-0.5 font-bold text-[8px]">→</span>
+                      <span className="text-slate-300 mx-[2px] font-bold text-[7px]">→</span>
                     )}
                   </div>
-                )) : <span className="text-[9px] text-slate-400 italic">尚未設定段落</span>}
+                )) : <span className="text-[8px] text-slate-400 italic">尚未設定段落</span>}
               </div>
             </div>
           </div>
@@ -833,18 +957,18 @@ const PrintLayoutContent = ({ meta, setlist }) => (
     </div>
 
     {/* Lyrics Layout in Columns */}
-    <div className="columns-2 gap-12 flex-1 pt-2">
+    <div className="columns-2 gap-10 flex-1 pt-0">
       {setlist.map((item, idx) => (
-        <div key={idx} className="mb-10 break-inside-avoid text-left" style={{ pageBreakInside: 'avoid' }}>
-          <div className="flex items-center gap-2.5 mb-4 border-b-2 border-slate-100 pb-2">
-            <span className="text-slate-300 font-black text-3xl font-serif leading-none">{idx + 1}.</span>
-            <h2 className="text-lg font-bold font-serif tracking-wide text-slate-900 leading-none pt-1">{item.title}</h2>
+        <div key={idx} className="mb-6 break-inside-avoid text-left" style={{ pageBreakInside: 'avoid' }}>
+          <div className="flex items-center gap-2 mb-2.5 border-b border-slate-100 pb-1">
+            <span className="text-slate-300 font-black text-[22px] font-serif leading-none">{idx + 1}.</span>
+            <h2 className="text-[15px] font-bold font-serif tracking-wide text-slate-900 leading-none pt-1">{item.title}</h2>
           </div>
-          <div className="space-y-5">
+          <div className="space-y-3.5">
             {item.lyrics?.map((s, si) => (
-              <div key={si} className="pl-3 border-l-[3px] border-sky-300">
-                <div className="font-bold text-sky-600 text-[10px] mb-1.5 tracking-widest uppercase">{TAG_EXPLANATIONS[s.section]?.split(' ')[0] || s.section} ({s.section})</div>
-                <div className="whitespace-pre-wrap text-[13px] text-slate-800 leading-[1.6] font-sans">{s.text}</div>
+              <div key={si} className="pl-2.5 border-l-[3px] border-sky-300">
+                <div className="font-bold text-sky-600 text-[9px] mb-1 tracking-widest uppercase">{TAG_EXPLANATIONS[s.section]?.split(' ')[0] || s.section} ({s.section})</div>
+                <div className="whitespace-pre-wrap text-[12px] text-slate-800 leading-[1.5] font-sans">{s.text}</div>
               </div>
             ))}
           </div>
@@ -853,9 +977,9 @@ const PrintLayoutContent = ({ meta, setlist }) => (
     </div>
 
     {/* Footer */}
-    <div className="mt-8 pt-4 border-t-2 border-slate-900 flex justify-between items-center">
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Irvine City Church</span>
-        <span className="text-[11px] font-bold text-slate-400 tracking-[0.2em] font-serif">用心靈和誠實敬拜</span>
+    <div className="mt-4 pt-3 border-t-2 border-slate-900 flex justify-between items-center">
+        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Irvine City Church</span>
+        <span className="text-[10px] font-bold text-slate-400 tracking-[0.2em] font-serif">用心靈和誠實敬拜</span>
     </div>
   </div>
 );
