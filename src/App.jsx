@@ -263,6 +263,57 @@ export default function App() {
     return (item.date && item.date.includes(q)) || (item.wl && item.wl.toLowerCase().includes(q)) || (item.songs && item.songs.some(s => s.title?.toLowerCase().includes(q)));
   });
 
+  // --- 新增：歌曲熱度統計與排行榜計算 ---
+  const songStats = React.useMemo(() => {
+    const stats = {};
+    const now = new Date();
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(now.getMonth() - 3);
+
+    songsDb.forEach(song => {
+      let count3Months = 0;
+      let latestDate = null;
+
+      setlistsDb.forEach(sl => {
+        if (sl.songs && sl.songs.some(s => s.songId === song.id)) {
+          const setlistDate = new Date(sl.date);
+          // 計算近三個月的次數
+          if (setlistDate >= threeMonthsAgo && setlistDate <= now) {
+            count3Months++;
+          }
+          // 找出最後一次唱的日期
+          if (!latestDate || setlistDate > latestDate) {
+            latestDate = setlistDate;
+          }
+        }
+      });
+
+      let weeksAgo = null;
+      if (latestDate) {
+        const diffTime = Math.max(0, now - latestDate);
+        weeksAgo = Math.floor(diffTime / (1000 * 60 * 60 * 24 * 7));
+      }
+
+      stats[song.id] = { count3Months, weeksAgo };
+    });
+    return stats;
+  }, [songsDb, setlistsDb]);
+
+  // 將計算結果合併至清單，並依據熱度排序
+  const displaySongs = React.useMemo(() => {
+    return (searchQuery ? searchResults : songsDb).map(song => ({
+      ...song,
+      stats: songStats[song.id] || { count3Months: 0, weeksAgo: null }
+    })).sort((a, b) => {
+      // 若沒有搜尋關鍵字，則依照熱度排序 (降冪)
+      if (!searchQuery && b.stats.count3Months !== a.stats.count3Months) {
+        return b.stats.count3Months - a.stats.count3Months; 
+      }
+      // 熱度相同或有搜尋時，依照筆畫排序
+      return (a.title || '').localeCompare(b.title || '');
+    });
+  }, [songsDb, searchResults, searchQuery, songStats]);
+
   const saveCurrentSetlist = async () => {
     if (!user) return;
     setIsSavingSetlist(true);
@@ -405,17 +456,29 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#FAFAFA] text-slate-900 font-sans relative overflow-x-hidden">
 
+      {/* Hidden Print Area */}
+      <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
+        <div id="actual-print-area" className="bg-white text-black p-6 w-[750px] mx-auto box-border">
+          <PrintLayoutContent meta={meta} setlist={setlist} />
+        </div>
+      </div>
+
       {/* Auth Modal */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl p-6 max-w-sm w-full shadow-2xl">
-            <h3 className="text-xl font-bold text-slate-900 mb-2 flex items-center gap-2"><Lock size={20} className="text-sky-500"/> 系統驗證</h3>
-            <p className="text-slate-500 text-sm mb-4">請輸入管理員密碼以進行修改。</p>
-            <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuthSubmit()} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-lg bg-slate-50 outline-none transition focus:border-sky-500" placeholder="請輸入密碼..." autoFocus />
-            {authError && <p className="text-red-500 text-xs mt-2 font-medium">{authError}</p>}
-            <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setShowAuthModal(false)} className="px-4 py-2 text-sm text-slate-600 rounded-lg">取消</button>
-              <button onClick={handleAuthSubmit} className="px-5 py-2 text-sm bg-sky-500 hover:bg-sky-600 text-white rounded-lg transition shadow-md">確認解鎖</button>
+          <div className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl text-center">
+            <div className="text-5xl mb-4 animate-bounce">🐰</div>
+            <h3 className="text-xl font-bold text-slate-900 mb-2 flex items-center justify-center gap-2">
+              <Lock size={20} className="text-sky-500"/> 系統驗證
+            </h3>
+            <div className="text-slate-600 text-[14px] leading-relaxed mb-6 font-medium bg-sky-50 p-4 rounded-xl border border-sky-100 shadow-inner">
+              編輯功能目前僅開放主領使用，<br/>如需權限請洽師母 🥺
+            </div>
+            <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuthSubmit()} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none transition focus:border-sky-500 text-center text-lg tracking-widest mb-2 shadow-sm" placeholder="••••" autoFocus />
+            {authError && <p className="text-red-500 text-xs font-bold mb-2">{authError}</p>}
+            <div className="flex justify-center gap-3 mt-6">
+              <button onClick={() => setShowAuthModal(false)} className="px-5 py-2.5 text-sm text-slate-500 hover:bg-slate-100 rounded-xl transition font-bold">取消返回</button>
+              <button onClick={handleAuthSubmit} className="px-6 py-2.5 text-sm bg-sky-500 hover:bg-sky-600 text-white rounded-xl transition shadow-md font-bold">確認解鎖</button>
             </div>
           </div>
         </div>
@@ -590,27 +653,56 @@ export default function App() {
               </div>
             ) : (
               <div className="p-8 bg-slate-50/50">
-                <h3 className="text-[11px] font-bold text-slate-400 mb-4 border-b pb-2 uppercase tracking-widest">
-                  {searchQuery ? '搜尋結果' : '瀏覽雲端詩歌庫 (全庫)'}
+                <h3 className="text-[11px] font-bold text-slate-400 mb-4 border-b pb-2 uppercase tracking-widest flex justify-between items-end">
+                  <span>{searchQuery ? '搜尋結果' : '瀏覽雲端詩歌庫 (全庫)'}</span>
+                  {!searchQuery && <span className="text-[9px] font-normal flex items-center gap-1 text-slate-400 bg-white border border-slate-200 shadow-sm px-2 py-0.5 rounded-full"><Crown size={10} className="text-orange-400"/> 依近3個月熱度排序</span>}
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                  {(searchQuery ? searchResults : songsDb).map(s => (
-                    <div key={s.id} onClick={() => handleSelectSong(s)} className="bg-white border border-slate-200 rounded-xl p-5 cursor-pointer hover:border-sky-400 hover:shadow-md transition group flex flex-col justify-between">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar pb-4">
+                  {displaySongs.map((s, index) => (
+                    <div key={s.id} onClick={() => handleSelectSong(s)} className="bg-white border border-slate-200 rounded-2xl p-5 cursor-pointer hover:border-sky-400 hover:shadow-lg transition-all group flex flex-col justify-between relative overflow-hidden">
+                      
+                      {/* Top 3 會有特殊皇冠或熱門標記 */}
+                      {s.stats.count3Months > 0 && index < 3 && !searchQuery && (
+                        <div className="absolute top-0 right-0 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[9px] font-bold px-3 py-1 rounded-bl-xl shadow-sm flex items-center gap-1">
+                          <Crown size={10} /> 推薦熱門
+                        </div>
+                      )}
+
                       <div>
-                        <h4 className="font-serif font-bold text-slate-800 text-[17px] group-hover:text-sky-600 mb-1 leading-tight">{s.title}</h4>
-                        <p className="text-[11px] text-slate-400 uppercase tracking-widest mb-3">{s.artist || '未知歌手'}</p>
+                        <h4 className="font-serif font-bold text-slate-800 text-[17px] group-hover:text-sky-600 mb-1 leading-tight pr-14">{s.title}</h4>
+                        <p className="text-[11px] text-slate-400 uppercase tracking-widest mb-4">{s.artist || '未知歌手'}</p>
                       </div>
-                      <div className="flex justify-between items-end mt-2">
-                        <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1"><Music size={12}/> {s.lyrics?.length || 0} 段落</span>
-                        <span className="font-mono text-xs font-bold text-sky-600 bg-sky-50 px-2 py-1 rounded-md border border-sky-100">{s.defaultKey || 'C'}</span>
+                      
+                      <div className="flex flex-col gap-2.5 mt-1">
+                        <div className="flex flex-wrap gap-1.5">
+                          {s.stats.count3Months > 0 ? (
+                            <span className="bg-red-50 text-red-600 text-[10px] px-2 py-1 rounded-md font-bold border border-red-100 flex items-center gap-1">
+                              🔥 近三月: {s.stats.count3Months} 次
+                            </span>
+                          ) : (
+                            <span className="bg-slate-50 text-slate-400 text-[10px] px-2 py-1 rounded-md font-medium border border-slate-100 flex items-center gap-1">
+                              ❄️ 近期未唱
+                            </span>
+                          )}
+                          {s.stats.weeksAgo !== null && (
+                            <span className="bg-sky-50 text-sky-600 text-[10px] px-2 py-1 rounded-md font-bold border border-sky-100 flex items-center gap-1">
+                              🕒 {s.stats.weeksAgo === 0 ? '本週剛唱' : `${s.stats.weeksAgo} 週前`}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex justify-between items-end pt-3 border-t border-slate-50 mt-1">
+                          <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1"><Music size={12}/> {s.lyrics?.length || 0} 段落</span>
+                          <span className="font-mono text-xs font-bold text-sky-600 bg-sky-50 px-2.5 py-1 rounded-lg border border-sky-100">{s.defaultKey || 'C'}</span>
+                        </div>
                       </div>
                     </div>
                   ))}
-                  {(searchQuery ? searchResults : songsDb).length === 0 && (
+                  {displaySongs.length === 0 && (
                     <div className="col-span-full py-16 text-center bg-white border border-slate-100 rounded-xl shadow-sm">
                       <div className="text-4xl mb-3">🥺</div>
                       <p className="mb-1 text-sm text-slate-600 font-bold">雲端資料庫查無此歌</p>
-                      <p className="text-xs text-slate-400">請點擊上方按鈕使用 AI 抓取或手動新增</p>
+                      <p className="text-xs text-slate-400">請點擊上方按鈕使用手動新增</p>
                     </div>
                   )}
                 </div>
@@ -697,7 +789,7 @@ const PrintLayoutContent = ({ meta, setlist }) => (
   <div className="bg-white text-slate-900 w-[816px] min-h-[1056px] mx-auto box-border p-[48px] flex flex-col font-sans">
     
     {/* Modern Header */}
-    <div className="flex justify-between items-end border-b-4 border-slate-900 pb-4 mb-8 mt-2">
+    <div className="flex justify-between items-end border-b-4 border-slate-900 pb-4 mb-6 mt-2">
       <div>
         <h1 className="text-4xl font-serif font-black tracking-widest text-slate-900 mb-1">WORSHIP MAP</h1>
         <p className="text-base font-bold text-slate-500 tracking-[0.2em] uppercase">{meta.date?.replace(/-/g, '/') || 'YYYY / MM / DD'}</p>
@@ -708,31 +800,31 @@ const PrintLayoutContent = ({ meta, setlist }) => (
       </div>
     </div>
 
-    {/* Highlighted Song Map Section */}
-    <div className="mb-10 bg-slate-50 rounded-2xl p-6 border border-slate-200">
-      <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-5 border-b border-slate-200 pb-2">Setlist Overview</h3>
-      <div className="space-y-6">
+    {/* Highlighted Song Map Section (優化壓縮為 Grid 排版) */}
+    <div className="mb-6 bg-slate-50 rounded-xl p-5 border border-slate-200">
+      <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3 border-b border-slate-200 pb-1.5">Setlist Overview</h3>
+      <div className="grid grid-cols-2 gap-x-8 gap-y-4">
         {setlist.map((item, idx) => (
-          <div key={idx} className="flex gap-4 items-start">
-            <div className="w-8 h-8 shrink-0 bg-slate-900 text-white rounded-full flex items-center justify-center font-bold font-serif text-sm">
+          <div key={idx} className="flex gap-3 items-start">
+            <div className="w-6 h-6 shrink-0 bg-slate-900 text-white rounded-full flex items-center justify-center font-bold font-serif text-[11px] mt-0.5 shadow-sm">
               {idx + 1}
             </div>
-            <div className="flex-1 pt-0.5">
-              <div className="flex items-end gap-3 mb-2.5">
-                <span className="font-bold text-lg font-serif leading-none">{item.title}</span>
-                <span className="text-sm font-mono font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded border border-sky-100 leading-none">Key: {item.key}</span>
+            <div className="flex-1 overflow-hidden">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="font-bold text-[14px] font-serif leading-none truncate">{item.title}</span>
+                <span className="text-[9px] font-mono font-bold text-sky-600 bg-sky-50 px-1.5 py-[2px] rounded border border-sky-100 leading-none shrink-0">{item.key}</span>
               </div>
-              <div className="flex flex-wrap gap-2 items-center mt-1">
+              <div className="flex flex-wrap gap-1 items-center">
                 {item.mapString ? item.mapString.split('-').map((tag, tIdx) => (
                   <div key={tIdx} className="flex items-center">
-                    <span className="inline-flex items-center justify-center px-2.5 py-1 bg-white border border-slate-300 text-slate-700 text-xs font-bold font-mono rounded-md shadow-sm">
+                    <span className="inline-flex items-center justify-center px-1.5 py-[2px] bg-white border border-slate-300 text-slate-700 text-[9px] font-bold font-mono rounded shadow-sm">
                       {tag}
                     </span>
                     {tIdx < item.mapString.split('-').length - 1 && (
-                      <span className="text-slate-300 mx-1.5 font-bold">→</span>
+                      <span className="text-slate-300 mx-0.5 font-bold text-[8px]">→</span>
                     )}
                   </div>
-                )) : <span className="text-xs text-slate-400 italic">尚未設定段落結構</span>}
+                )) : <span className="text-[9px] text-slate-400 italic">尚未設定段落</span>}
               </div>
             </div>
           </div>
@@ -763,7 +855,7 @@ const PrintLayoutContent = ({ meta, setlist }) => (
     {/* Footer */}
     <div className="mt-8 pt-4 border-t-2 border-slate-900 flex justify-between items-center">
         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Irvine City Church</span>
-        <span className="text-[10px] italic text-slate-400 uppercase tracking-[0.4em] font-serif">Soli Deo Gloria</span>
+        <span className="text-[11px] font-bold text-slate-400 tracking-[0.2em] font-serif">用心靈和誠實敬拜</span>
     </div>
   </div>
 );
