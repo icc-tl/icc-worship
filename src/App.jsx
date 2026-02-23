@@ -74,37 +74,6 @@ const MOCK_SETLISTS = [
 ];
 
 // -----------------------------------------------------------------------------
-// AI Service (Gemini API with Search)
-// -----------------------------------------------------------------------------
-const callGeminiLyricsAI = async (title, artist, ytLink) => {
-  const apiKey = ""; // 執行環境會自動提供 API Key
-  const systemPrompt = `你是一個專業的教會敬拜詩歌助手。請幫我找到這首詩歌的完整歌詞並將其結構化。要求的 JSON 格式：[{"section": "V", "text": "歌詞內容..."}, ...] 段落標記：'V', 'V1', 'V2', 'V3', 'V4', 'PC', 'C', 'C1', 'C2', 'C3', 'B'。規則：清洗吉他和弦與雜訊，僅輸出 JSON。`;
-  const userQuery = `歌名：${title}, 歌手：${artist}, 參考連結：${ytLink}。請使用 Google Search 確保歌詞準確。`;
-
-  const payload = {
-    contents: [{ parts: [{ text: userQuery }] }],
-    systemInstruction: { parts: [{ text: systemPrompt }] },
-    tools: [{ google_search: {} }],
-    generationConfig: { responseMimeType: "application/json" }
-  };
-
-  try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!response.ok) throw new Error("AI Request Failed");
-    const result = await response.json();
-    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-    return JSON.parse(text);
-  } catch (e) {
-    console.error("Gemini AI Error:", e);
-    return null;
-  }
-};
-
-// -----------------------------------------------------------------------------
 // UI Helper Components
 // -----------------------------------------------------------------------------
 const ICCLogo = ({ className }) => (
@@ -166,11 +135,8 @@ export default function App() {
   const [deleteSetlistConfirmId, setDeleteSetlistConfirmId] = useState(null);
   const [homeSearchQuery, setHomeSearchQuery] = useState(''); 
 
-  // --- AI Crawler State ---
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiForm, setAiForm] = useState({ title: '', artist: '', url: '' });
-  const [aiError, setAiError] = useState('');
+  // --- AI / Feature State ---
+  const [showComingSoonModal, setShowComingSoonModal] = useState(false); // 取代了 showAIModal
 
   // --- Editor State ---
   const [editingItem, setEditingItem] = useState(null);
@@ -346,13 +312,16 @@ export default function App() {
           s.onload = res; s.onerror = rej; document.head.appendChild(s);
         });
       }
-      const el = document.getElementById('actual-print-area');
+      
+      // 這裡直接抓取預覽畫面中「可見的」 DOM 元素，確保 CSS 渲染 100% 同步
+      const el = document.getElementById('pdf-print-area');
       const dateStr = meta.date ? meta.date.replace(/-/g, '') : 'Date';
       const opt = { 
-        margin: [12, 12, 12, 12], 
+        margin: [0, 0, 0, 0], // 設定為0，透過內部 padding 控制，排版更精準
         filename: `ICC_WorshipMap_${dateStr}.pdf`, 
-        html2canvas: { scale: 3, useCORS: true, windowWidth: 800, logging: false }, 
-        jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' } 
+        image: { type: 'jpeg', quality: 1 },
+        html2canvas: { scale: 2, useCORS: true, letterRendering: true }, 
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' } 
       };
       await window.html2pdf().set(opt).from(el).save();
     } catch (e) { console.error("PDF Export Error:", e); } finally { setIsGenerating(false); }
@@ -383,19 +352,6 @@ export default function App() {
   };
 
   const deleteItem = (id) => { setSetlist(setlist.filter(item => item.id !== id)); };
-
-  // AI Lyrics Helper
-  const handleAIImport = async () => {
-    if (!aiForm.title || !aiForm.url) { setAiError('請填寫完整歌名與連結。'); return; }
-    setAiLoading(true); setAiError('');
-    const res = await callGeminiLyricsAI(aiForm.title, aiForm.artist, aiForm.url);
-    if (res) {
-      setCustomTitle(aiForm.title); setCustomArtist(aiForm.artist || 'AI Generated'); setCustomYoutubeUrl(aiForm.url);
-      setCustomLyrics(res); setManualSource('editor'); setView('manual'); setShowAIModal(false); setAiForm({ title: '', artist: '', url: '' });
-      setSaveError('');
-    } else { setAiError('AI 抓取失敗，請檢查網路或手動輸入。'); }
-    setAiLoading(false);
-  };
 
   const openManualEntry = (songToEdit = null, initialTitle = '', source = 'manage') => {
     setManualSource(source);
@@ -448,12 +404,6 @@ export default function App() {
   // -----------------------------------------------------------------------------
   return (
     <div className="min-h-screen bg-[#FAFAFA] text-slate-900 font-sans relative overflow-x-hidden">
-      {/* Hidden Print Area */}
-      <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
-        <div id="actual-print-area" className="bg-white text-black p-6 w-[750px] mx-auto box-border">
-          <PrintLayoutContent meta={meta} setlist={setlist} />
-        </div>
-      </div>
 
       {/* Auth Modal */}
       {showAuthModal && (
@@ -471,19 +421,19 @@ export default function App() {
         </div>
       )}
 
-      {/* AI Search Modal */}
-      {showAIModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl">
-            <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold flex items-center gap-2 font-serif text-slate-900"><Sparkles size={22} className="text-sky-500"/> AI 智能歌詞匯入</h3><button onClick={() => !aiLoading && setShowAIModal(false)}><X size={20}/></button></div>
-            <div className="space-y-4">
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">歌名 *</label><input type="text" value={aiForm.title} onChange={e => setAiForm({...aiForm, title: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 border rounded-lg outline-none focus:border-sky-500" /></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">歌手 (建議填寫)</label><input type="text" value={aiForm.artist} onChange={e => setAiForm({...aiForm, artist: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 border rounded-lg outline-none focus:border-sky-500" /></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">YouTube 連結 *</label><input type="text" value={aiForm.url} onChange={e => setAiForm({...aiForm, url: e.target.value})} className="w-full px-4 py-2.5 bg-slate-50 border rounded-lg outline-none focus:border-sky-500" placeholder="貼上 YouTube 影片網址..." /></div>
-            </div>
-            {aiError && <div className="mt-4 p-3 bg-red-50 text-red-600 text-xs rounded-lg border border-red-100">{aiError}</div>}
-            <div className="flex gap-3 mt-8"><button disabled={aiLoading} onClick={() => setShowAIModal(false)} className="flex-1 px-4 py-3 text-sm text-slate-600 rounded-lg">取消</button><button disabled={aiLoading} onClick={handleAIImport} className="flex-2 px-6 py-3 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-lg shadow-lg flex items-center justify-center gap-2">{aiLoading ? <Loader2 size={18} className="animate-spin"/> : <Wand2 size={16}/>} {aiLoading ? 'AI 分析中' : '開始解析'}</button></div>
-            <p className="text-[9px] text-slate-400 text-center mt-4">由 Gemini AI 與 Google Search 技術驅動</p>
+      {/* Coming Soon Modal (取代原本的 AI Modal) */}
+      {showComingSoonModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl text-center relative overflow-hidden">
+            <button onClick={() => setShowComingSoonModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><X size={20}/></button>
+            <div className="text-6xl mb-4 animate-bounce mt-2">🙇‍♂️</div>
+            <h3 className="text-2xl font-bold text-slate-900 mb-2 font-serif">敬請期待</h3>
+            <p className="text-slate-600 mb-8 text-[15px] leading-relaxed font-medium">
+              AI 智能歌詞抓取功能開發中！<br/>爭取在牧師安息回來前做出來 🥺
+            </p>
+            <button onClick={() => setShowComingSoonModal(false)} className="w-full px-4 py-3.5 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-xl transition shadow-lg text-sm tracking-widest">
+              我知道了
+            </button>
           </div>
         </div>
       )}
@@ -602,7 +552,8 @@ export default function App() {
                   <label className="text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">由雲端資料庫搜尋或新增</label>
                   <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-5 w-5" /><input type="text" value={searchQuery} onChange={e => { setSearchQuery(e.target.value); setShowDropdown(true); }} className="w-full pl-10 pr-3 py-3 border-b-2 bg-transparent focus:border-sky-500 outline-none font-serif text-lg transition" placeholder="輸入歌名搜尋..." /></div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-                    <button onClick={() => requireAdmin(() => setShowAIModal(true))} className="py-2.5 px-4 bg-gradient-to-r from-sky-50 to-transparent border border-sky-100 hover:border-sky-300 rounded-xl text-[13px] text-slate-700 font-bold flex items-center justify-center gap-2 transition shadow-sm hover:shadow">
+                    {/* 按鈕改為呼叫 showComingSoonModal */}
+                    <button onClick={() => requireAdmin(() => setShowComingSoonModal(true))} className="py-2.5 px-4 bg-gradient-to-r from-sky-50 to-transparent border border-sky-100 hover:border-sky-300 rounded-xl text-[13px] text-slate-700 font-bold flex items-center justify-center gap-2 transition shadow-sm hover:shadow">
                       <Sparkles size={16} className="text-sky-500"/> 找不到？AI 智能抓取
                     </button>
                     <button onClick={() => requireAdmin(() => openManualEntry(null, '', 'editor'))} className="py-2.5 px-4 bg-white border border-slate-200 hover:border-sky-500 rounded-xl text-[13px] text-slate-700 font-bold flex items-center justify-center gap-2 transition shadow-sm hover:shadow">
@@ -706,7 +657,8 @@ export default function App() {
               </button>
               {showAddDropdown && (
                 <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-slate-100 shadow-xl rounded-xl overflow-hidden z-20 flex flex-col">
-                  <button onClick={() => { setShowAddDropdown(false); requireAdmin(() => setShowAIModal(true)); }} className="text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 text-slate-700 transition border-b border-slate-50"><Sparkles size={14} className="text-sky-500"/> AI 歌詞抓取</button>
+                  {/* 按鈕改為呼叫 showComingSoonModal */}
+                  <button onClick={() => { setShowAddDropdown(false); requireAdmin(() => setShowComingSoonModal(true)); }} className="text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 text-slate-700 transition border-b border-slate-50"><Sparkles size={14} className="text-sky-500"/> AI 歌詞抓取</button>
                   <button onClick={() => { setShowAddDropdown(false); requireAdmin(() => openManualEntry(null, '', 'manage')); }} className="text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 text-slate-700 transition"><Edit2 size={14} className="text-slate-400"/> 手動新增檔案</button>
                 </div>
               )}
@@ -717,9 +669,15 @@ export default function App() {
       )}
 
       {view === 'preview' && (
-        <div className="min-h-screen flex flex-col bg-[#FAFAFA]">
+        <div className="min-h-screen flex flex-col bg-slate-200">
           <header className="bg-white/90 backdrop-blur-md border-b px-6 py-4 flex justify-between items-center sticky top-0 z-50 shadow-sm"><button onClick={() => setView(previewSource)} className="flex items-center gap-2 font-medium hover:text-slate-900 transition text-slate-500"><ChevronLeft size={20}/> 返回前頁</button><span className="font-serif font-bold flex items-center gap-2 text-slate-800 text-lg"><Eye size={18} className="text-[#C4A977]"/> 敬拜歌單預覽 (US Letter)</span><button onClick={handleExportPDF} disabled={isGenerating} className="px-6 py-2 bg-sky-500 hover:bg-sky-600 text-white rounded-lg font-bold shadow-lg transition active:scale-95 disabled:opacity-50">{isGenerating ? '正在產生 PDF...' : '立即下載 PDF'} <Download size={16}/></button></header>
-          <main className="flex-1 overflow-y-auto p-8 flex justify-center pb-24"><div className="bg-white shadow-2xl w-[816px] min-h-[1056px] p-12 relative box-border rounded-sm border border-slate-100 overflow-hidden"><PrintLayoutContent meta={meta} setlist={setlist} /></div></main>
+          
+          {/* 將列印區域直接顯示在畫面中，確保 HTML2PDF 能 100% 抓取樣式 */}
+          <main className="flex-1 overflow-y-auto p-8 flex justify-center pb-24">
+            <div id="pdf-print-area" className="bg-white shadow-2xl relative overflow-hidden">
+              <PrintLayoutContent meta={meta} setlist={setlist} />
+            </div>
+          </main>
         </div>
       )}
 
@@ -732,34 +690,80 @@ export default function App() {
   );
 }
 
+// -----------------------------------------------------------------------------
+// PDF / Print Layout Content (重新設計的高質感版面)
+// -----------------------------------------------------------------------------
 const PrintLayoutContent = ({ meta, setlist }) => (
-  <div className="text-black font-sans bg-white leading-snug flex flex-col w-full">
-    <div className="flex justify-between items-start mb-6 border-b-2 border-black pb-2">
-      <p className="font-bold text-[14px]">WL: {meta.wl || '_________________'}</p>
-      <p className="font-bold text-[14px]">Date: {meta.date?.replace(/-/g, '/') || '___/___/___'}</p>
+  <div className="bg-white text-slate-900 w-[816px] min-h-[1056px] mx-auto box-border p-[48px] flex flex-col font-sans">
+    
+    {/* Modern Header */}
+    <div className="flex justify-between items-end border-b-4 border-slate-900 pb-4 mb-8 mt-2">
+      <div>
+        <h1 className="text-4xl font-serif font-black tracking-widest text-slate-900 mb-1">WORSHIP MAP</h1>
+        <p className="text-base font-bold text-slate-500 tracking-[0.2em] uppercase">{meta.date?.replace(/-/g, '/') || 'YYYY / MM / DD'}</p>
+      </div>
+      <div className="text-right">
+        <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400 mb-1">Worship Leader</p>
+        <p className="text-xl font-serif font-bold text-slate-800">{meta.wl || '未指定'}</p>
+      </div>
     </div>
-    <div className="mb-6 space-y-1">
-      {setlist.map((item, idx) => (
-        <div key={idx} className="flex text-[13px]">
-          <span className="w-56 font-bold truncate pr-3 font-serif">"{item.title}({item.key})"</span>
-          <span className="text-slate-700 font-mono tracking-tighter">, "{item.mapString}"</span>
-        </div>
-      ))}
-    </div>
-    <div className="text-center mb-6 uppercase"><h1 className="text-[18px] font-bold font-serif tracking-[0.15em] border-b-2 border-black inline-block pb-1 px-8">ICC Worship Hub</h1></div>
-    <div className="columns-2 gap-10 flex-1">
-      {setlist.map((item, idx) => (
-        <div key={idx} className="mb-8 break-inside-avoid" style={{ pageBreakInside: 'avoid' }}>
-          <h2 className="text-[14px] font-bold font-serif border-l-4 border-slate-900 pl-2 mb-3 leading-tight uppercase tracking-wide">{item.title} <span className="font-sans font-normal text-slate-500">({item.key})</span></h2>
-          {item.lyrics?.map((s, si) => (
-            <div key={si} className="mb-3 pl-3 border-l border-slate-100">
-              <div className="font-bold text-slate-800 text-[11px] mb-1 tracking-widest uppercase">({s.section})</div>
-              <div className="whitespace-pre-wrap text-[12px] break-words text-slate-900 leading-relaxed font-sans">{s.text}</div>
+
+    {/* Highlighted Song Map Section */}
+    <div className="mb-10 bg-slate-50 rounded-2xl p-6 border border-slate-200">
+      <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-5 border-b border-slate-200 pb-2">Setlist Overview</h3>
+      <div className="space-y-6">
+        {setlist.map((item, idx) => (
+          <div key={idx} className="flex gap-4 items-start">
+            <div className="w-8 h-8 shrink-0 bg-slate-900 text-white rounded-full flex items-center justify-center font-bold font-serif text-sm">
+              {idx + 1}
             </div>
-          ))}
+            <div className="flex-1 pt-0.5">
+              <div className="flex items-end gap-3 mb-2.5">
+                <span className="font-bold text-lg font-serif leading-none">{item.title}</span>
+                <span className="text-sm font-mono font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded border border-sky-100 leading-none">Key: {item.key}</span>
+              </div>
+              <div className="flex flex-wrap gap-2 items-center mt-1">
+                {item.mapString ? item.mapString.split('-').map((tag, tIdx) => (
+                  <div key={tIdx} className="flex items-center">
+                    <span className="inline-flex items-center justify-center px-2.5 py-1 bg-white border border-slate-300 text-slate-700 text-xs font-bold font-mono rounded-md shadow-sm">
+                      {tag}
+                    </span>
+                    {tIdx < item.mapString.split('-').length - 1 && (
+                      <span className="text-slate-300 mx-1.5 font-bold">→</span>
+                    )}
+                  </div>
+                )) : <span className="text-xs text-slate-400 italic">尚未設定段落結構</span>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {/* Lyrics Layout in Columns */}
+    <div className="columns-2 gap-12 flex-1 pt-2">
+      {setlist.map((item, idx) => (
+        <div key={idx} className="mb-10 break-inside-avoid text-left" style={{ pageBreakInside: 'avoid' }}>
+          <div className="flex items-center gap-2.5 mb-4 border-b-2 border-slate-100 pb-2">
+            <span className="text-slate-300 font-black text-3xl font-serif leading-none">{idx + 1}.</span>
+            <h2 className="text-lg font-bold font-serif tracking-wide text-slate-900 leading-none pt-1">{item.title}</h2>
+          </div>
+          <div className="space-y-5">
+            {item.lyrics?.map((s, si) => (
+              <div key={si} className="pl-3 border-l-[3px] border-sky-300">
+                <div className="font-bold text-sky-600 text-[10px] mb-1.5 tracking-widest uppercase">{TAG_EXPLANATIONS[s.section]?.split(' ')[0] || s.section} ({s.section})</div>
+                <div className="whitespace-pre-wrap text-[13px] text-slate-800 leading-[1.6] font-sans">{s.text}</div>
+              </div>
+            ))}
+          </div>
         </div>
       ))}
     </div>
-    <div className="mt-12 pt-4 border-t border-slate-200 text-[10px] text-center italic text-slate-400 uppercase tracking-[0.4em] font-serif">Soli Deo Gloria</div>
+
+    {/* Footer */}
+    <div className="mt-8 pt-4 border-t-2 border-slate-900 flex justify-between items-center">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Irvine City Church</span>
+        <span className="text-[10px] italic text-slate-400 uppercase tracking-[0.4em] font-serif">Soli Deo Gloria</span>
+    </div>
   </div>
 );
