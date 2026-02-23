@@ -25,12 +25,12 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 // -----------------------------------------------------------------------------
 // Constants & Mock Data
 // -----------------------------------------------------------------------------
-const SONG_MAP_TAGS = ['I', 'V', 'V1', 'V2', 'PC', 'C', 'C1', 'C2', 'C3', 'B', 'IT', 'FW', 'L1', 'L2', 'L3', 'OT', 'E'];
+const SONG_MAP_TAGS = ['I', 'V', 'V1', 'V2', 'V3', 'V4', 'PC', 'C', 'C1', 'C2', 'C3', 'B', 'IT', 'FW', 'L1', 'L2', 'L3', 'OT', 'E'];
 const STRUCTURAL_TAGS = ['I', 'IT', 'FW', 'L1', 'L2', 'L3', 'OT', 'E'];
 const KEYS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B', 'D-E', 'E-F#', 'F-G', 'G-A'];
 
 const TAG_EXPLANATIONS = {
-  'I': '前奏 (Intro)', 'V': '主歌 (Verse)', 'V1': '第一節主歌 (Verse 1)', 'V2': '第二節主歌 (Verse 2)',
+  'I': '前奏 (Intro)', 'V': '主歌 (Verse)', 'V1': '第一節主歌 (Verse 1)', 'V2': '第二節主歌 (Verse 2)', 'V3': '第三節主歌 (Verse 3)', 'V4': '第四節主歌 (Verse 4)',
   'PC': '導歌 (Pre Chorus)', 'C': '副歌 (Chorus)', 'C1': '副歌 1 (Chorus 1)', 'C2': '副歌 2 (Chorus 2)', 'C3': '副歌 3 (Chorus 3)', 
   'B': '橋段 (Bridge)', 'IT': '間奏 (Interlude)',
   'FW': '自由敬拜 (Free Worship)', 'L1': '最後一句 (Last Line)', 'L2': '最後兩句 (Last 2 Lines)',
@@ -78,7 +78,7 @@ const MOCK_SETLISTS = [
 // -----------------------------------------------------------------------------
 const callGeminiLyricsAI = async (title, artist, ytLink) => {
   const apiKey = ""; // 執行環境會自動提供 API Key
-  const systemPrompt = `你是一個專業的教會敬拜詩歌助手。請幫我找到這首詩歌的完整歌詞並將其結構化。要求的 JSON 格式：[{"section": "V", "text": "歌詞內容..."}, ...] 段落標記：'V', 'V1', 'V2', 'PC', 'C', 'C1', 'C2', 'C3', 'B'。規則：清洗吉他和弦與雜訊，僅輸出 JSON。`;
+  const systemPrompt = `你是一個專業的教會敬拜詩歌助手。請幫我找到這首詩歌的完整歌詞並將其結構化。要求的 JSON 格式：[{"section": "V", "text": "歌詞內容..."}, ...] 段落標記：'V', 'V1', 'V2', 'V3', 'V4', 'PC', 'C', 'C1', 'C2', 'C3', 'B'。規則：清洗吉他和弦與雜訊，僅輸出 JSON。`;
   const userQuery = `歌名：${title}, 歌手：${artist}, 參考連結：${ytLink}。請使用 Google Search 確保歌詞準確。`;
 
   const payload = {
@@ -193,7 +193,7 @@ export default function App() {
   const [librarySearch, setLibrarySearch] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [showAddDropdown, setShowAddDropdown] = useState(false);
-  const [saveError, setSaveError] = useState(''); // 新增：用於顯示儲存錯誤訊息
+  const [saveError, setSaveError] = useState('');
 
   const searchRef = useRef(null);
   const addDropdownRef = useRef(null);
@@ -229,10 +229,8 @@ export default function App() {
     const songsRef = collection(db, 'artifacts', appId, 'public', 'data', 'icc_songs');
     const unsubSongs = onSnapshot(songsRef, (snapshot) => {
       if (snapshot.empty && songsDb.length === 0) {
-        // 先立刻將畫面更新為 Mock Data，避免等待期間畫面空白
         setSongsDb(MOCK_SONGS);
         setIsDbReady(true);
-        // 背景執行寫入資料庫
         MOCK_SONGS.forEach(s => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'icc_songs', s.id), s).catch(console.error));
       } else if (!snapshot.empty) {
         const loaded = snapshot.docs.map(d => d.data());
@@ -242,7 +240,6 @@ export default function App() {
       }
     }, (err) => {
       console.error("Firestore Songs Error:", err);
-      // 若連線失敗，退回顯示預設資料
       setSongsDb(MOCK_SONGS);
       setIsDbReady(true);
     });
@@ -361,7 +358,14 @@ export default function App() {
     } catch (e) { console.error("PDF Export Error:", e); } finally { setIsGenerating(false); }
   };
 
-  const handleSelectSong = (song) => { setCurrentSong(song); setCurrentKey(song.defaultKey || 'C'); setCurrentMap(''); setSearchQuery(song.title); setShowDropdown(false); };
+  const handleSelectSong = (song) => { 
+    setCurrentSong(song); 
+    setCurrentKey(song.defaultKey || 'C'); 
+    setCurrentMap(''); 
+    setSearchQuery(song.title); 
+    setShowDropdown(false); 
+  };
+
   const handleAppendTag = (tag) => { setCurrentMap(prev => prev ? `${prev}-${tag}` : tag); };
   
   const saveToSetlist = () => {
@@ -395,7 +399,7 @@ export default function App() {
 
   const openManualEntry = (songToEdit = null, initialTitle = '', source = 'manage') => {
     setManualSource(source);
-    setSaveError(''); // 清除先前的錯誤
+    setSaveError('');
     if (songToEdit) {
       setEditingDbSongId(songToEdit.id); setCustomTitle(songToEdit.title); setCustomArtist(songToEdit.artist || ''); setCustomKey(songToEdit.defaultKey || 'C'); setCustomYoutubeUrl(songToEdit.youtubeId ? `https://youtu.be/${songToEdit.youtubeId}` : ''); setCustomLyrics(songToEdit.lyrics && songToEdit.lyrics.length > 0 ? songToEdit.lyrics : [{ section: 'V', text: '' }]);
     } else {
@@ -491,7 +495,7 @@ export default function App() {
             <div className="flex items-center gap-2">
               {isAdmin ? <span className="text-sky-600 font-bold flex items-center gap-1"><Unlock size={12}/> 權限已解鎖</span> : <span className="flex items-center gap-1"><Lock size={12}/> 訪客模式</span>}
             </div>
-            {/* 新增：資料庫連線狀態指示 */}
+            {/* 資料庫連線狀態指示 */}
             <div className="flex items-center gap-1.5 border-l border-slate-200 pl-4">
               {user ? (
                 <span className="text-emerald-500 font-bold flex items-center gap-1.5 tracking-widest"><div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> 雲端資料庫已連線</span>
@@ -591,8 +595,8 @@ export default function App() {
       {view === 'editor' && (
         <div className="pb-20 max-w-5xl mx-auto p-4 sm:p-8 pt-4">
           <header className="mb-8 border-b pb-6 flex justify-between items-center"><button onClick={() => setView('list')} className="flex items-center gap-2 font-medium text-slate-500 hover:text-slate-900 transition"><ChevronLeft size={18}/> 返回歌單</button><div className="font-serif tracking-widest uppercase font-bold text-slate-700">{editingItem ? '編輯歌曲段落' : '新增歌曲至歌單'}</div></header>
-          <div className="bg-white border rounded-2xl shadow-sm">
-            <div className="p-8 bg-[#FAFAFA] border-b rounded-t-2xl">
+          <div className="bg-white border rounded-2xl shadow-sm overflow-hidden">
+            <div className="p-8 bg-[#FAFAFA] border-b">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="md:col-span-3 relative" ref={searchRef}>
                   <label className="text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">由雲端資料庫搜尋或新增</label>
@@ -605,7 +609,8 @@ export default function App() {
                       <Edit2 size={16} className="text-slate-400"/> 手動建立新詩歌
                     </button>
                   </div>
-                  {showDropdown && searchQuery && (
+                  {/* 只有在有選擇歌曲時，才顯示覆蓋式的下拉選單以供切換；若無選擇，則會顯示在下方的全畫面網格中 */}
+                  {showDropdown && searchQuery && currentSong && (
                     <ul className="absolute z-20 mt-2 w-full bg-white shadow-2xl border rounded-2xl max-h-64 overflow-auto border-slate-100">
                       {searchResults.length > 0 ? searchResults.map(s => (<li key={s.id} onClick={() => handleSelectSong(s)} className="p-4 border-b last:border-0 border-slate-50 flex justify-between cursor-pointer hover:bg-slate-50 group transition"><span className="font-serif font-bold text-slate-800 group-hover:text-sky-600">{s.title}</span><span className="text-xs text-slate-400 uppercase tracking-widest group-hover:text-sky-500">{s.artist}</span></li>)) : <li className="p-10 text-center bg-slate-50"><p className="mb-2 text-sm text-slate-500 font-bold">雲端資料庫查無此歌 🥺</p><p className="text-xs text-slate-400 mb-4">請點擊上方按鈕使用 AI 或手動新增</p></li>}
                     </ul>
@@ -614,8 +619,10 @@ export default function App() {
                 <div className="md:col-span-1"><label className="text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">調性 (Key)</label><select value={currentKey} onChange={e => setCurrentKey(e.target.value)} className="w-full px-3 py-3 border-b-2 bg-transparent focus:border-sky-500 font-sans text-base transition outline-none">{KEYS.map(k => <option key={k} value={k}>{k}</option>)}</select></div>
               </div>
             </div>
-            {currentSong && (
-              <div className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-12 rounded-b-2xl">
+            
+            {/* 根據是否已選擇歌曲，切換下方畫面 */}
+            {currentSong ? (
+              <div className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-12 bg-white">
                 <div>
                   <div className="flex flex-wrap gap-3 mb-8"><a href={currentSong.youtubeId ? `https://youtu.be/${currentSong.youtubeId}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(currentSong.title)}`} target="_blank" rel="noopener noreferrer" className="px-4 py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl text-sm font-bold flex items-center gap-2 transition hover:bg-red-100"><Youtube size={16}/> YouTube 聆聽</a><button onClick={() => requireAdmin(() => openManualEntry(currentSong, '', 'editor'))} className="px-4 py-2.5 bg-slate-50 border rounded-xl text-sm font-bold flex items-center gap-2 transition hover:bg-slate-100 text-slate-700"><Database size={16} className="text-sky-500"/> 編輯詩歌檔案</button></div>
                   <h3 className="text-[11px] font-bold text-slate-400 mb-4 border-b pb-2 uppercase tracking-widest">歌詞預覽</h3>
@@ -628,6 +635,33 @@ export default function App() {
                   <div className="flex flex-wrap gap-2 mb-6">{SONG_MAP_TAGS.map(tag => { const isAvail = STRUCTURAL_TAGS.includes(tag) || currentSong.lyrics?.some(l => l.section === tag); return (<button key={tag} onClick={() => isAvail && handleAppendTag(tag)} disabled={!isAvail} title={TAG_EXPLANATIONS[tag]} className={`px-3 py-1.5 font-mono text-sm border rounded-lg transition ${isAvail ? 'bg-white text-slate-700 hover:border-sky-500 shadow-sm cursor-pointer' : 'bg-slate-50 text-slate-300 cursor-not-allowed opacity-60'}`}>{tag}</button>); })}</div>
                   <div className="mb-8"><label className="text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">編輯字串 (Map String)</label><textarea value={currentMap} onChange={e => setCurrentMap(e.target.value)} rows={4} className="w-full border rounded-xl p-4 bg-white font-mono shadow-sm outline-none focus:border-sky-500 transition text-blue-600 font-bold" placeholder="例如：I-V1-C-V2-C-B-C-E" /></div>
                   <button onClick={saveToSetlist} disabled={!currentMap.trim()} className="w-full py-4 bg-sky-500 hover:bg-sky-600 text-white font-serif rounded-xl shadow-lg transition active:scale-[0.98] disabled:opacity-50">確認加入歌單</button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-8 bg-slate-50/50">
+                <h3 className="text-[11px] font-bold text-slate-400 mb-4 border-b pb-2 uppercase tracking-widest">
+                  {searchQuery ? '搜尋結果' : '瀏覽雲端詩歌庫 (全庫)'}
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                  {(searchQuery ? searchResults : songsDb).map(s => (
+                    <div key={s.id} onClick={() => handleSelectSong(s)} className="bg-white border border-slate-200 rounded-xl p-5 cursor-pointer hover:border-sky-400 hover:shadow-md transition group flex flex-col justify-between">
+                      <div>
+                        <h4 className="font-serif font-bold text-slate-800 text-[17px] group-hover:text-sky-600 mb-1 leading-tight">{s.title}</h4>
+                        <p className="text-[11px] text-slate-400 uppercase tracking-widest mb-3">{s.artist || '未知歌手'}</p>
+                      </div>
+                      <div className="flex justify-between items-end mt-2">
+                        <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1"><Music size={12}/> {s.lyrics?.length || 0} 段落</span>
+                        <span className="font-mono text-xs font-bold text-sky-600 bg-sky-50 px-2 py-1 rounded-md border border-sky-100">{s.defaultKey || 'C'}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {(searchQuery ? searchResults : songsDb).length === 0 && (
+                    <div className="col-span-full py-16 text-center bg-white border border-slate-100 rounded-xl shadow-sm">
+                      <div className="text-4xl mb-3">🥺</div>
+                      <p className="mb-1 text-sm text-slate-600 font-bold">雲端資料庫查無此歌</p>
+                      <p className="text-xs text-slate-400">請點擊上方按鈕使用 AI 抓取或手動新增</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
