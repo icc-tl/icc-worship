@@ -109,7 +109,7 @@ const generateId = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? 
 const ICCLogo = ({ className }) => (
   <div className={`flex flex-col items-center justify-center ${className}`}>
     <img 
-      src="https://static.wixstatic.com/media/bdcebb_ef3ed0565d6d4ffc8f41b87e4edc0599~mv2.png/v1/fill/w_236,h_64,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ICC_Logo.png" 
+      src="[https://static.wixstatic.com/media/bdcebb_ef3ed0565d6d4ffc8f41b87e4edc0599~mv2.png/v1/fill/w_236,h_64,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ICC_Logo.png](https://static.wixstatic.com/media/bdcebb_ef3ed0565d6d4ffc8f41b87e4edc0599~mv2.png/v1/fill/w_236,h_64,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ICC_Logo.png)" 
       alt="Irvine City Church Logo" className="h-8 sm:h-14 object-contain"
     />
   </div>
@@ -338,7 +338,7 @@ export default function App() {
               if (homeSearchQuery === dateStr) setHomeSearchQuery(''); // 取消過濾
               else if (hasSetlist) setHomeSearchQuery(dateStr); // 過濾此日歌單
             }}
-            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm transition-all relative
+            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs transition-all relative
               ${isSelected ? 'bg-sky-500 text-white font-bold shadow-md scale-110' :
                 hasSetlist ? 'bg-sky-50 text-sky-600 font-bold hover:bg-sky-100 border border-sky-200 cursor-pointer' :
                 isToday ? 'bg-slate-100 text-slate-900 font-bold' :
@@ -346,7 +346,7 @@ export default function App() {
           >
             {d}
             {hasSetlist && !isSelected && (
-              <span className="absolute bottom-1 w-1 h-1 bg-sky-500 rounded-full"></span>
+              <span className="absolute bottom-0.5 w-1 h-1 bg-sky-500 rounded-full"></span>
             )}
           </button>
         </div>
@@ -466,7 +466,7 @@ export default function App() {
       if (!window.html2pdf) {
         await new Promise((res, rej) => {
           const s = document.createElement('script');
-          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+          s.src = '[https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js](https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js)';
           s.onload = res; s.onerror = rej; document.head.appendChild(s);
         });
       }
@@ -854,16 +854,20 @@ export default function App() {
               </div>
 
               {/* Calendar Sidebar Column */}
-              <div className="w-full lg:w-[320px] shrink-0 order-1 lg:order-2 lg:sticky lg:top-24 z-10">
-                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 sm:p-6">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-serif font-bold text-slate-800 text-lg flex items-center gap-2">
-                      <CalendarDays size={18} className="text-sky-500"/> 歌單行事曆
-                    </h3>
-                    <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-100">
-                      <button onClick={prevMonth} className="p-1 hover:bg-white rounded text-slate-400 hover:text-sky-600 transition shadow-sm"><ChevronLeft size={16}/></button>
-                      <span className="text-xs font-bold text-slate-600 font-mono w-16 text-center">{currentMonth.getFullYear()} / {currentMonth.getMonth() + 1}</span>
-                      <button onClick={nextMonth} className="p-1 hover:bg-white rounded text-slate-400 hover:text-sky-600 transition shadow-sm"><ChevronRight size={16}/></button>
+              <div className="w-full lg:w-[280px] shrink-0 order-1 lg:order-2 lg:sticky lg:top-8 z-10 self-start">
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-5">
+                  <div className="flex justify-between items-center mb-3">
+                    <div className="font-serif font-bold text-slate-800 text-[17px] tracking-wider pl-1">
+                      {currentMonth.getFullYear()} <span className="text-slate-300 font-light mx-0.5">/</span> <span className="text-sky-600">{String(currentMonth.getMonth() + 1).padStart(2, '0')}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => setCurrentMonth(new Date())} className="text-[10px] text-slate-500 font-bold bg-slate-50 border border-slate-200 hover:border-sky-300 hover:text-sky-600 px-2 py-1 rounded-md transition shadow-sm" title="回到今天">
+                        Today
+                      </button>
+                      <div className="flex items-center bg-slate-50 rounded-lg border border-slate-100 p-0.5">
+                        <button onClick={prevMonth} className="p-1 hover:bg-white rounded-md text-slate-400 hover:text-sky-600 transition shadow-sm"><ChevronLeft size={14}/></button>
+                        <button onClick={nextMonth} className="p-1 hover:bg-white rounded-md text-slate-400 hover:text-sky-600 transition shadow-sm"><ChevronRight size={14}/></button>
+                      </div>
                     </div>
                   </div>
                   
@@ -873,7 +877,7 @@ export default function App() {
 
                   {homeSearchQuery && setlistsDb.some(s => s.date === homeSearchQuery) && (
                     <div className="mt-4 pt-4 border-t border-slate-100 text-center">
-                      <button onClick={() => setHomeSearchQuery('')} className="text-xs font-bold text-slate-400 hover:text-sky-600 transition flex items-center justify-center gap-1 w-full bg-slate-50 hover:bg-sky-50 py-2 rounded-lg">
+                      <button onClick={() => setHomeSearchQuery('')} className="text-[11px] font-bold text-slate-400 hover:text-sky-600 transition flex items-center justify-center gap-1 w-full bg-slate-50 hover:bg-sky-50 py-2 rounded-lg">
                         <X size={14}/> 顯示全部歌單
                       </button>
                     </div>
@@ -1061,7 +1065,7 @@ export default function App() {
             <div className="mb-8 sm:mb-10 flex flex-col sm:flex-row gap-6">
               <div className="flex-1">
                 <label className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1 uppercase tracking-widest"><Youtube size={14} className="text-red-500"/> YouTube 連結或 ID (必填)</label>
-                <input type="text" value={customYoutubeUrl} onChange={e => setCustomYoutubeUrl(e.target.value)} className="w-full border-b-2 bg-transparent p-2 text-xs sm:text-sm outline-none transition focus:border-sky-500" placeholder="https://youtu.be/..." />
+                <input type="text" value={customYoutubeUrl} onChange={e => setCustomYoutubeUrl(e.target.value)} className="w-full border-b-2 bg-transparent p-2 text-xs sm:text-sm outline-none transition focus:border-sky-500" placeholder="[https://youtu.be/](https://youtu.be/)..." />
               </div>
               <div className="flex items-end pb-2">
                 <label className="flex items-center gap-2.5 cursor-pointer group">
@@ -1199,7 +1203,7 @@ export default function App() {
             <p className="text-[9px] sm:text-[10px] text-slate-400 font-serif italic leading-relaxed mb-4 sm:mb-6 max-w-2xl px-2">
               This site is for internal worship use at Irvine City Church only.<br className="hidden sm:block"/>All lyrics and music copyrights belong to their respective original authors.
             </p>
-            <a href="https://www.irvinecitychurch.com" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center px-5 sm:px-6 py-2 sm:py-2.5 bg-slate-900 text-white text-[10px] sm:text-[11px] font-bold uppercase tracking-widest rounded-full hover:bg-sky-600 transition shadow-md">
+            <a href="[https://www.irvinecitychurch.com](https://www.irvinecitychurch.com)" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center px-5 sm:px-6 py-2 sm:py-2.5 bg-slate-900 text-white text-[10px] sm:text-[11px] font-bold uppercase tracking-widest rounded-full hover:bg-sky-600 transition shadow-md">
               Contact Us
             </a>
           </div>
