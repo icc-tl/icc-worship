@@ -27,6 +27,9 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 // -----------------------------------------------------------------------------
 const callGeminiLyricsAI = async (title, artist, ytLink, customApiKey = "") => {
   const apiKey = customApiKey || ""; 
+  // 智慧判斷：如果有自訂金鑰，使用公開版 gemini-1.5-flash 以避免 404 錯誤
+  const modelName = apiKey ? "gemini-1.5-flash" : "gemini-2.5-flash-preview-09-2025";
+  
   const prompt = `你是一個專業的教會敬拜詩歌助手。請幫我找到這首詩歌的完整歌詞並將其結構化。要求的 JSON 格式：[{"section": "V", "text": "歌詞內容..."}, ...] 段落標記：'V', 'V1', 'V2', 'V3', 'V4', 'PC', 'C', 'C1', 'C2', 'C3', 'B'。規則：清洗吉他和弦與雜訊，僅輸出 JSON。\n\n歌名：${title}, 歌手：${artist}, 參考連結：${ytLink}。請使用 Google Search 確保歌詞準確。`;
 
   const payload = {
@@ -36,7 +39,7 @@ const callGeminiLyricsAI = async (title, artist, ytLink, customApiKey = "") => {
   };
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -97,6 +100,9 @@ const parsePDFWithGemini = async (pdfFile, customApiKey = "") => {
   }
 
   const apiKey = customApiKey || "";
+  // 智慧判斷：如果有自訂金鑰，使用公開版 gemini-1.5-flash 以避免 404 錯誤
+  const modelName = apiKey ? "gemini-1.5-flash" : "gemini-2.5-flash-preview-09-2025";
+
   const prompt = `你是一個專業的教會敬拜歌單解析助手。
   請解析以下從歌單 PDF 中擷取出的純文字內容，提取出歌單的日期、主領(WL)，以及每一首詩歌的資訊。
   
@@ -130,7 +136,7 @@ const parsePDFWithGemini = async (pdfFile, customApiKey = "") => {
   };
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -248,8 +254,10 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
 
-  // --- API Key State (解決 Vercel 403 問題) ---
-  const [localApiKey, setLocalApiKey] = useState(() => localStorage.getItem('icc_gemini_key') || '');
+  // --- API Key State (解決 Vercel 404/403 問題) ---
+  const [localApiKey, setLocalApiKey] = useState(() => {
+    try { return localStorage.getItem('icc_gemini_key') || ''; } catch { return ''; }
+  });
 
   // --- Database State ---
   const [songsDb, setSongsDb] = useState([]); 
@@ -666,8 +674,8 @@ export default function App() {
         setPdfError("無法解析檔案內容，請確認檔案是否為有效的 PDF 歌單。");
       }
     } catch(e) {
-      if (e.message.includes('403')) {
-        setPdfError("【需要 API 金鑰】系統在雲端環境中需要您的授權才能執行 AI。請在下方輸入您的 Gemini API Key：");
+      if (e.message.includes('403') || e.message.includes('404')) {
+        setPdfError("【請輸入 API 金鑰】此環境無法使用預設模型，請輸入您專屬的 Gemini API Key 來啟用 AI 匯入功能：");
       } else {
         setPdfError("解析失敗：" + e.message);
       }
@@ -753,7 +761,7 @@ export default function App() {
                        value={localApiKey}
                        onChange={e => {
                          setLocalApiKey(e.target.value);
-                         localStorage.setItem('icc_gemini_key', e.target.value);
+                         try { localStorage.setItem('icc_gemini_key', e.target.value); } catch(err) {}
                        }}
                        className="w-full px-3 py-2.5 border border-slate-200 rounded-md outline-none focus:border-red-400 font-mono text-sm tracking-wider"
                      />
@@ -810,6 +818,7 @@ export default function App() {
           <div className="flex flex-wrap items-center justify-center gap-4 w-full sm:w-auto">
             {view !== 'home' && <button onClick={() => setView('home')} className="hover:text-sky-600 transition flex items-center gap-1"><Home size={12}/> 返回首頁</button>}
             
+            {/* 將「AI 舊歌單匯入」功能隱藏在這裡，作為進階管理選項 */}
             <button onClick={() => requireAdmin(() => setShowPdfImportModal(true))} className="hover:text-sky-600 transition flex items-center gap-1">
               <FileText size={12}/> 匯入 PDF 歌單
             </button>
