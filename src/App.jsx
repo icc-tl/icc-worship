@@ -23,18 +23,14 @@ const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 
 // -----------------------------------------------------------------------------
-// AI Service (Gemini API with Search)
+// AI Service (Gemini API with Search & PDF)
 // -----------------------------------------------------------------------------
 const callGeminiLyricsAI = async (title, artist, ytLink) => {
-  // 為了讓預覽環境正常運作，此處恢復設定為空字串。
-  // 若您部署至 Vercel，請於您的本機原始碼中將其替換為 import.meta.env.VITE_GEMINI_API_KEY
   const apiKey = ""; 
-  const systemPrompt = `你是一個專業的教會敬拜詩歌助手。請幫我找到這首詩歌的完整歌詞並將其結構化。要求的 JSON 格式：[{"section": "V", "text": "歌詞內容..."}, ...] 段落標記：'V', 'V1', 'V2', 'V3', 'V4', 'PC', 'C', 'C1', 'C2', 'C3', 'B'。規則：清洗吉他和弦與雜訊，僅輸出 JSON。`;
-  const userQuery = `歌名：${title}, 歌手：${artist}, 參考連結：${ytLink}。請使用 Google Search 確保歌詞準確。`;
+  const prompt = `你是一個專業的教會敬拜詩歌助手。請幫我找到這首詩歌的完整歌詞並將其結構化。要求的 JSON 格式：[{"section": "V", "text": "歌詞內容..."}, ...] 段落標記：'V', 'V1', 'V2', 'V3', 'V4', 'PC', 'C', 'C1', 'C2', 'C3', 'B'。規則：清洗吉他和弦與雜訊，僅輸出 JSON。\n\n歌名：${title}, 歌手：${artist}, 參考連結：${ytLink}。請使用 Google Search 確保歌詞準確。`;
 
   const payload = {
-    contents: [{ parts: [{ text: userQuery }] }],
-    systemInstruction: { parts: [{ text: systemPrompt }] },
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
     tools: [{ google_search: {} }],
     generationConfig: { responseMimeType: "application/json" }
   };
@@ -45,13 +41,81 @@ const callGeminiLyricsAI = async (title, artist, ytLink) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    if (!response.ok) throw new Error("AI Request Failed");
+    
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("API Error Response:", errText);
+      throw new Error(`API 請求失敗 (${response.status})`);
+    }
+    
     const result = await response.json();
-    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+    let text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return null;
+    
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
     return JSON.parse(text);
   } catch (e) {
     console.error("Gemini AI Error:", e);
     return null;
+  }
+};
+
+const parsePDFWithGemini = async (base64Pdf) => {
+  const apiKey = "";
+  const prompt = `你是一個專業的教會敬拜歌單解析助手。
+  請解析這份 PDF 檔案，提取出歌單的日期、主領(WL)，以及每一首詩歌的資訊。
+  
+  必須輸出符合以下 JSON 格式的資料 (僅輸出 JSON，不要其他文字)：
+  {
+    "date": "YYYY-MM-DD",
+    "wl": "主領名字",
+    "songs": [
+      {
+        "title": "歌名 (不含調性)",
+        "key": "調性 (例如 F, E, D)",
+        "mapString": "段落順序字串 (需轉換為系統代碼)",
+        "lyrics": [
+          { "section": "V", "text": "該段落歌詞內容... 若找不到請設為空陣列" }
+        ]
+      }
+    ]
+  }
+  【段落標記嚴格規則】：'I' (Intro/前奏), 'V' (Verse/主歌), 'V1', 'V2', 'V3', 'V4', 'PC' (Pre Chorus), 'C' (Chorus/副歌), 'C1', 'C2', 'C3', 'B' (Bridge/橋段), 'IT' (Interlude/間奏), 'FW' (Free Worship), 'L1' (最後一句), 'L2', 'L3', 'OT' (Outro), 'E' (End/結尾)。
+  MapString 請使用上述代碼以 '-' 連接，例如 'I-V-C-IT-V-C-B-C-E'。`;
+  
+  const payload = {
+    contents: [{
+      role: "user",
+      parts: [
+        { text: prompt },
+        { inlineData: { mimeType: "application/pdf", data: base64Pdf } }
+      ]
+    }],
+    generationConfig: { responseMimeType: "application/json" }
+  };
+
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("API Error Response:", errText);
+      throw new Error(`伺服器拒絕請求 (${response.status})。這可能是預覽環境阻擋了 PDF 傳輸，請部署至正式主機後再試。`);
+    }
+
+    const result = await response.json();
+    let text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error("AI 未回傳有效內容");
+
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    return JSON.parse(text);
+  } catch (e) {
+    console.error("parsePDFWithGemini Error:", e);
+    throw e;
   }
 };
 
@@ -508,55 +572,6 @@ export default function App() {
       setPdfError('');
     };
     reader.readAsDataURL(file);
-  };
-
-  const parsePDFWithGemini = async (base64Pdf) => {
-    // 為了讓預覽環境正常運作，此處恢復設定為空字串。
-    // 若您部署至 Vercel，請於您的本機原始碼中將其替換為 import.meta.env.VITE_GEMINI_API_KEY
-    const apiKey = "";
-    const systemPrompt = `你是一個專業的教會敬拜歌單解析助手。
-    請解析這份 PDF 檔案，提取出歌單的日期、主領(WL)，以及每一首詩歌的資訊。
-    
-    必須輸出符合以下 JSON 格式的資料 (僅輸出 JSON，不要其他文字)：
-    {
-      "date": "YYYY-MM-DD", // 盡量轉換為此格式，找不到留空
-      "wl": "主領名字", // 找不到留空
-      "songs": [
-        {
-          "title": "歌名 (不含調性)",
-          "key": "調性 (例如 F, E, D)",
-          "mapString": "段落順序字串 (例如 Intro-V1-V2-C... 需依照原檔 Map 翻譯成對應標記)",
-          "lyrics": [
-            { "section": "V", "text": "該段落歌詞內容... 若找不到歌詞請設為空陣列" }
-          ]
-        }
-      ]
-    }
-    【段落標記(section)嚴格規則】：
-    請務必將原檔的段落名稱轉換為系統代碼：'I' (Intro/前奏), 'V' (Verse/主歌), 'V1' (Verse 1), 'V2' (Verse 2), 'V3', 'V4', 'PC' (Pre Chorus/導歌), 'C' (Chorus/副歌), 'C1', 'C2', 'C3', 'B' (Bridge/橋段), 'IT' (Interlude/間奏), 'FW' (Free Worship), 'L1' (最後一句), 'L2', 'L3', 'OT' (Outro), 'E' (End/結尾)。
-    例如原檔寫 [Verse] 請轉為 V，[Chorus] 轉為 C，[Bridge] 轉為 B。
-    MapString 也請使用上述代碼以 '-' 連接，例如 'I-V-C-IT-V-C-B-C-E'。`;
-    
-    const payload = {
-      contents: [{
-        parts: [
-          { text: "請解析這份 PDF 歌單檔案，並僅輸出要求的 JSON 格式結構。" },
-          { inlineData: { mimeType: "application/pdf", data: base64Pdf } }
-        ]
-      }],
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      generationConfig: { responseMimeType: "application/json" }
-    };
-
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!response.ok) throw new Error("AI 解析請求失敗");
-    const result = await response.json();
-    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-    return JSON.parse(text);
   };
 
   const handlePdfSubmit = async () => {
