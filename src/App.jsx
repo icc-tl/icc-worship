@@ -73,6 +73,8 @@ const MOCK_SETLISTS = [
   }
 ];
 
+const generateId = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `id-${Date.now()}-${Math.floor(Math.random()*1000)}`;
+
 // -----------------------------------------------------------------------------
 // UI Helper Components
 // -----------------------------------------------------------------------------
@@ -137,6 +139,11 @@ export default function App() {
 
   // --- Feature State ---
   const [showComingSoonModal, setShowComingSoonModal] = useState(false); 
+  const [showPdfImportModal, setShowPdfImportModal] = useState(false);
+  const [pdfFile, setPdfFile] = useState(null);
+  const [pdfFileName, setPdfFileName] = useState('');
+  const [isPdfParsing, setIsPdfParsing] = useState(false);
+  const [pdfError, setPdfError] = useState('');
 
   // --- Editor State ---
   const [editingItem, setEditingItem] = useState(null);
@@ -399,7 +406,7 @@ export default function App() {
   const saveToSetlist = () => {
     if (!currentSong) return;
     if (editingItem) setSetlist(setlist.map(i => i.id === editingItem.id ? { ...i, key: currentKey, mapString: currentMap } : i));
-    else setSetlist([...setlist, { id: Date.now().toString(), songId: currentSong.id, title: currentSong.title, key: currentKey, mapString: currentMap, lyrics: currentSong.lyrics }]);
+    else setSetlist([...setlist, { id: generateId(), songId: currentSong.id, title: currentSong.title, key: currentKey, mapString: currentMap, lyrics: currentSong.lyrics }]);
     setView('list');
   };
 
@@ -456,6 +463,132 @@ export default function App() {
 
   const executeDeleteDbSong = async (id) => { if (!user) return; await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'icc_songs', id)); setDeleteConfirmId(null); };
 
+  // --- PDF Import Logic ---
+  const handlePdfUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64String = event.target.result.split(',')[1];
+      setPdfFile(base64String);
+      setPdfFileName(file.name);
+      setPdfError('');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const parsePDFWithGemini = async (base64Pdf) => {
+    const apiKey = "";
+    const systemPrompt = `你是一個專業的教會敬拜歌單解析助手。
+    請解析這份 PDF 檔案，提取出歌單的日期、主領(WL)，以及每一首詩歌的資訊。
+    
+    必須輸出符合以下 JSON 格式的資料 (僅輸出 JSON，不要其他文字)：
+    {
+      "date": "YYYY-MM-DD", // 盡量轉換為此格式，找不到留空
+      "wl": "主領名字", // 找不到留空
+      "songs": [
+        {
+          "title": "歌名 (不含調性)",
+          "key": "調性 (例如 F, E, D)",
+          "mapString": "段落順序字串 (例如 Intro-V1-V2-C... 需依照原檔 Map 翻譯成對應標記)",
+          "lyrics": [
+            { "section": "V", "text": "該段落歌詞內容... 若找不到歌詞請設為空陣列" }
+          ]
+        }
+      ]
+    }
+    【段落標記(section)嚴格規則】：
+    請務必將原檔的段落名稱轉換為系統代碼：'I' (Intro/前奏), 'V' (Verse/主歌), 'V1' (Verse 1), 'V2' (Verse 2), 'V3', 'V4', 'PC' (Pre Chorus/導歌), 'C' (Chorus/副歌), 'C1', 'C2', 'C3', 'B' (Bridge/橋段), 'IT' (Interlude/間奏), 'FW' (Free Worship), 'L1' (最後一句), 'L2', 'L3', 'OT' (Outro), 'E' (End/結尾)。
+    例如原檔寫 [Verse] 請轉為 V，[Chorus] 轉為 C，[Bridge] 轉為 B。
+    MapString 也請使用上述代碼以 '-' 連接，例如 'I-V-C-IT-V-C-B-C-E'。`;
+    
+    const payload = {
+      contents: [{
+        parts: [
+          { text: "請解析這份 PDF 歌單檔案，並僅輸出要求的 JSON 格式結構。" },
+          { inlineData: { mimeType: "application/pdf", data: base64Pdf } }
+        ]
+      }],
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      generationConfig: { responseMimeType: "application/json" }
+    };
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error("AI 解析請求失敗");
+    const result = await response.json();
+    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+    return JSON.parse(text);
+  };
+
+  const handlePdfSubmit = async () => {
+    if (!pdfFile) return setPdfError("請先選擇 PDF 檔案");
+    setIsPdfParsing(true);
+    setPdfError('');
+    try {
+      const result = await parsePDFWithGemini(pdfFile);
+      if (result && result.songs && result.songs.length > 0) {
+        
+        const newSetlistSongs = [];
+        
+        for (const song of result.songs) {
+          let existingSong = songsDb.find(s => s.title.replace(/\s+/g,'').toLowerCase() === song.title.replace(/\s+/g,'').toLowerCase());
+          
+          if (!existingSong) {
+            existingSong = {
+              id: 'pdf-song-' + generateId(),
+              title: song.title,
+              artist: 'PDF 匯入',
+              defaultKey: song.key || 'C',
+              youtubeId: '',
+              lyrics: song.lyrics || []
+            };
+            if (user) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'icc_songs', existingSong.id), existingSong);
+            }
+          }
+
+          newSetlistSongs.push({
+            id: generateId(),
+            songId: existingSong.id,
+            title: song.title,
+            key: song.key || existingSong.defaultKey,
+            mapString: song.mapString || '',
+            lyrics: song.lyrics && song.lyrics.length > 0 ? song.lyrics : existingSong.lyrics
+          });
+        }
+        
+        const newSetlistId = 'setlist-' + Date.now();
+        const setlistData = {
+          id: newSetlistId,
+          date: result.date || today,
+          wl: result.wl || '',
+          songs: newSetlistSongs,
+          updatedAt: new Date().toISOString()
+        };
+
+        if (user) {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'icc_setlists', newSetlistId), setlistData);
+        }
+        
+        setShowPdfImportModal(false);
+        setPdfFile(null);
+        setPdfFileName('');
+        openSetlist(setlistData);
+      } else {
+        setPdfError("無法解析檔案內容，請確認檔案是否為有效的 PDF 歌單。");
+      }
+    } catch(e) {
+      setPdfError("解析失敗：" + e.message);
+    } finally {
+      setIsPdfParsing(false);
+    }
+  };
+
+
   const getMonthNameShort = (m) => ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][parseInt(m)-1] || m;
 
   // -----------------------------------------------------------------------------
@@ -492,6 +625,47 @@ export default function App() {
         </div>
       )}
 
+      {/* PDF AI Import Modal */}
+      {showPdfImportModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative overflow-hidden">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold flex items-center gap-2 font-serif text-slate-900">
+                <Sparkles size={22} className="text-sky-500"/> AI 舊歌單匯入
+              </h3>
+              <button onClick={() => !isPdfParsing && setShowPdfImportModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={20}/>
+              </button>
+            </div>
+            
+            <div className="text-[13px] text-slate-600 mb-6 leading-relaxed bg-sky-50 p-4 rounded-xl border border-sky-100">
+              請上傳過去使用的 <b>Song Map (PDF 格式)</b>。AI 將為您建立新歌單，並自動把沒見過的「新詩歌」建檔存入雲端詩歌庫中！✨
+            </div>
+
+            <div className="mb-6">
+              <label className={`flex flex-col items-center justify-center w-full h-32 border-2 ${pdfFile ? 'border-sky-400 bg-sky-50' : 'border-slate-300 bg-slate-50'} border-dashed rounded-xl cursor-pointer hover:bg-slate-100 transition`}>
+                <div className="flex flex-col items-center justify-center pt-5 pb-6 px-4 text-center">
+                  <FileText className={`w-8 h-8 mb-2 ${pdfFile ? 'text-sky-500' : 'text-slate-400'}`} />
+                  <p className="text-sm font-bold text-slate-700 truncate max-w-[250px]">{pdfFileName || '點擊選擇 PDF 檔案'}</p>
+                  {!pdfFileName && <p className="text-xs text-slate-400 mt-1 font-medium">支援 .pdf 格式</p>}
+                </div>
+                <input type="file" accept="application/pdf" className="hidden" onChange={handlePdfUpload} disabled={isPdfParsing} />
+              </label>
+            </div>
+
+            {pdfError && <div className="mb-6 p-3 bg-red-50 text-red-600 text-xs rounded-lg border border-red-100 font-bold">{pdfError}</div>}
+            
+            <div className="flex gap-3">
+              <button disabled={isPdfParsing} onClick={() => setShowPdfImportModal(false)} className="flex-1 px-4 py-3 text-sm text-slate-600 rounded-xl font-bold hover:bg-slate-100 transition">取消</button>
+              <button disabled={isPdfParsing || !pdfFile} onClick={handlePdfSubmit} className="flex-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 transition disabled:opacity-50">
+                {isPdfParsing ? <Loader2 size={18} className="animate-spin"/> : <Wand2 size={16}/>} 
+                {isPdfParsing ? 'AI 深度解析中...' : '開始匯入'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Coming Soon Modal */}
       {showComingSoonModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
@@ -500,7 +674,7 @@ export default function App() {
             <div className="text-6xl mb-4 animate-bounce mt-2">🙇‍♂️</div>
             <h3 className="text-2xl font-bold text-slate-900 mb-2 font-serif">敬請期待</h3>
             <p className="text-slate-600 mb-8 text-[15px] leading-relaxed font-medium">
-              AI 智能歌詞抓取功能開發中！<br/>爭取在牧師安息回來前做出來 🙏
+              AI 網址抓取功能開發中！<br/>爭取在牧師安息回來前做出來 🙏
             </p>
             <button onClick={() => setShowComingSoonModal(false)} className="w-full px-4 py-3.5 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-xl transition shadow-lg text-sm tracking-widest">
               我知道了
@@ -527,6 +701,12 @@ export default function App() {
           </div>
           <div className="flex flex-wrap items-center justify-center gap-4 w-full sm:w-auto">
             {view !== 'home' && <button onClick={() => setView('home')} className="hover:text-sky-600 transition flex items-center gap-1"><Home size={12}/> 返回首頁</button>}
+            
+            {/* 將「AI 舊歌單匯入」功能隱藏在這裡，作為進階管理選項 */}
+            <button onClick={() => requireAdmin(() => setShowPdfImportModal(true))} className="hover:text-sky-600 transition flex items-center gap-1">
+              <FileText size={12}/> 匯入 PDF 歌單
+            </button>
+            
             <button onClick={() => requireAdmin(() => setView('manage'))} className="hover:text-sky-600 transition flex items-center gap-1"><Database size={12}/> 雲端詩歌庫</button>
           </div>
         </div>
@@ -662,7 +842,7 @@ export default function App() {
                   <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4 sm:h-5 sm:w-5" /><input type="text" value={searchQuery} onChange={e => { setSearchQuery(e.target.value); setShowDropdown(true); }} className="w-full pl-9 sm:pl-10 pr-3 py-2.5 sm:py-3 border-b-2 bg-transparent focus:border-sky-500 outline-none font-serif text-base sm:text-lg transition" placeholder="輸入歌名搜尋..." /></div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 mt-3 sm:mt-4">
                     <button onClick={() => requireAdmin(() => setShowComingSoonModal(true))} className="py-2 sm:py-2.5 px-3 sm:px-4 bg-gradient-to-r from-sky-50 to-transparent border border-sky-100 hover:border-sky-300 rounded-xl text-xs sm:text-[13px] text-slate-700 font-bold flex items-center justify-center gap-1.5 sm:gap-2 transition shadow-sm hover:shadow">
-                      <Sparkles size={14} className="text-sky-500"/> 找不到？AI 智能抓取
+                      <Sparkles size={14} className="text-sky-500"/> 找不到？AI 網址抓取
                     </button>
                     <button onClick={() => requireAdmin(() => openManualEntry(null, '', 'editor'))} className="py-2 sm:py-2.5 px-3 sm:px-4 bg-white border border-slate-200 hover:border-sky-500 rounded-xl text-xs sm:text-[13px] text-slate-700 font-bold flex items-center justify-center gap-1.5 sm:gap-2 transition shadow-sm hover:shadow">
                       <Edit2 size={14} className="text-slate-400"/> 手動建立新詩歌
@@ -793,7 +973,7 @@ export default function App() {
               </button>
               {showAddDropdown && (
                 <div className="absolute top-full right-0 mt-2 w-full sm:w-48 bg-white border border-slate-100 shadow-xl rounded-xl overflow-hidden z-20 flex flex-col">
-                  <button onClick={() => { setShowAddDropdown(false); requireAdmin(() => setShowComingSoonModal(true)); }} className="text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 text-slate-700 transition border-b border-slate-50"><Sparkles size={14} className="text-sky-500"/> AI 歌詞抓取</button>
+                  <button onClick={() => { setShowAddDropdown(false); requireAdmin(() => setShowComingSoonModal(true)); }} className="text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 text-slate-700 transition border-b border-slate-50"><Sparkles size={14} className="text-sky-500"/> AI 網址抓取</button>
                   <button onClick={() => { setShowAddDropdown(false); requireAdmin(() => openManualEntry(null, '', 'manage')); }} className="text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 text-slate-700 transition"><Edit2 size={14} className="text-slate-400"/> 手動新增檔案</button>
                 </div>
               )}
