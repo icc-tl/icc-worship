@@ -25,8 +25,8 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 // -----------------------------------------------------------------------------
 // AI Service (Gemini API with Search & PDF Text Extraction)
 // -----------------------------------------------------------------------------
-const callGeminiLyricsAI = async (title, artist, ytLink) => {
-  const apiKey = ""; 
+const callGeminiLyricsAI = async (title, artist, ytLink, customApiKey = "") => {
+  const apiKey = customApiKey || ""; 
   const prompt = `你是一個專業的教會敬拜詩歌助手。請幫我找到這首詩歌的完整歌詞並將其結構化。要求的 JSON 格式：[{"section": "V", "text": "歌詞內容..."}, ...] 段落標記：'V', 'V1', 'V2', 'V3', 'V4', 'PC', 'C', 'C1', 'C2', 'C3', 'B'。規則：清洗吉他和弦與雜訊，僅輸出 JSON。\n\n歌名：${title}, 歌手：${artist}, 參考連結：${ytLink}。請使用 Google Search 確保歌詞準確。`;
 
   const payload = {
@@ -43,8 +43,7 @@ const callGeminiLyricsAI = async (title, artist, ytLink) => {
     });
     
     if (!response.ok) {
-      const errText = await response.text();
-      console.error("API Error Response:", errText);
+      if (response.status === 403 || response.status === 400) throw new Error("403");
       throw new Error(`API 請求失敗 (${response.status})`);
     }
     
@@ -56,7 +55,7 @@ const callGeminiLyricsAI = async (title, artist, ytLink) => {
     return JSON.parse(text);
   } catch (e) {
     console.error("Gemini AI Error:", e);
-    return null;
+    throw e;
   }
 };
 
@@ -91,13 +90,13 @@ const extractTextFromPdf = async (file) => {
   }
 };
 
-const parsePDFWithGemini = async (pdfFile) => {
+const parsePDFWithGemini = async (pdfFile, customApiKey = "") => {
   const extractedText = await extractTextFromPdf(pdfFile);
   if (!extractedText || extractedText.trim().length < 10) {
     throw new Error("無法讀取 PDF 內容（可能是掃描圖片檔），請上傳含有純文字的歌單 PDF。");
   }
 
-  const apiKey = "";
+  const apiKey = customApiKey || "";
   const prompt = `你是一個專業的教會敬拜歌單解析助手。
   請解析以下從歌單 PDF 中擷取出的純文字內容，提取出歌單的日期、主領(WL)，以及每一首詩歌的資訊。
   
@@ -138,6 +137,7 @@ const parsePDFWithGemini = async (pdfFile) => {
     });
     
     if (!response.ok) {
+      if (response.status === 403 || response.status === 400) throw new Error("403");
       const errText = await response.text();
       console.error("API Error Response:", errText);
       throw new Error(`API 請求失敗 (${response.status})`);
@@ -247,6 +247,9 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
+
+  // --- API Key State (解決 Vercel 403 問題) ---
+  const [localApiKey, setLocalApiKey] = useState(() => localStorage.getItem('icc_gemini_key') || '');
 
   // --- Database State ---
   const [songsDb, setSongsDb] = useState([]); 
@@ -610,7 +613,7 @@ export default function App() {
     setIsPdfParsing(true);
     setPdfError('');
     try {
-      const result = await parsePDFWithGemini(pdfFile);
+      const result = await parsePDFWithGemini(pdfFile, localApiKey);
       if (result && result.songs && result.songs.length > 0) {
         
         const newSetlistSongs = [];
@@ -663,7 +666,11 @@ export default function App() {
         setPdfError("無法解析檔案內容，請確認檔案是否為有效的 PDF 歌單。");
       }
     } catch(e) {
-      setPdfError("解析失敗：" + e.message);
+      if (e.message.includes('403')) {
+        setPdfError("【需要 API 金鑰】系統在雲端環境中需要您的授權才能執行 AI。請在下方輸入您的 Gemini API Key：");
+      } else {
+        setPdfError("解析失敗：" + e.message);
+      }
     } finally {
       setIsPdfParsing(false);
     }
@@ -734,7 +741,27 @@ export default function App() {
               </label>
             </div>
 
-            {pdfError && <div className="mb-6 p-3 bg-red-50 text-red-600 text-xs rounded-lg border border-red-100 font-bold">{pdfError}</div>}
+            {/* 如果有錯誤，包含 403 錯誤，會顯示在這邊，並且允許輸入 API Key */}
+            {pdfError && (
+              <div className="mb-6 p-4 bg-red-50 text-red-700 text-xs rounded-xl border border-red-100 font-bold flex flex-col gap-2 shadow-sm">
+                <div className="flex items-start gap-1.5"><X size={16} className="shrink-0 mt-0.5"/> <span className="leading-relaxed">{pdfError}</span></div>
+                {pdfError.includes('API 金鑰') && (
+                  <div className="mt-2 flex flex-col gap-2 bg-white p-3 rounded-lg border border-red-100 shadow-inner">
+                     <input 
+                       type="password" 
+                       placeholder="輸入 AIza... 開頭的 Gemini 金鑰" 
+                       value={localApiKey}
+                       onChange={e => {
+                         setLocalApiKey(e.target.value);
+                         localStorage.setItem('icc_gemini_key', e.target.value);
+                       }}
+                       className="w-full px-3 py-2.5 border border-slate-200 rounded-md outline-none focus:border-red-400 font-mono text-sm tracking-wider"
+                     />
+                     <p className="text-[10px] text-slate-500 font-normal mt-0.5">※ 金鑰將安全地儲存在您的瀏覽器中，不會公開上傳。若無金鑰請至 Google AI Studio 免費申請。</p>
+                  </div>
+                )}
+              </div>
+            )}
             
             <div className="flex gap-3">
               <button disabled={isPdfParsing} onClick={() => setShowPdfImportModal(false)} className="flex-1 px-4 py-3 text-sm text-slate-600 rounded-xl font-bold hover:bg-slate-100 transition">取消</button>
@@ -783,7 +810,6 @@ export default function App() {
           <div className="flex flex-wrap items-center justify-center gap-4 w-full sm:w-auto">
             {view !== 'home' && <button onClick={() => setView('home')} className="hover:text-sky-600 transition flex items-center gap-1"><Home size={12}/> 返回首頁</button>}
             
-            {/* 將「AI 舊歌單匯入」功能隱藏在這裡，作為進階管理選項 */}
             <button onClick={() => requireAdmin(() => setShowPdfImportModal(true))} className="hover:text-sky-600 transition flex items-center gap-1">
               <FileText size={12}/> 匯入 PDF 歌單
             </button>
