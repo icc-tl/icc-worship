@@ -5,7 +5,7 @@ import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged }
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 // -----------------------------------------------------------------------------
-// Firebase & App Configuration (正式版設定 - 相容預覽環境)
+// Firebase & App Configuration (正式版設定 - 避免全域變數衝突)
 // -----------------------------------------------------------------------------
 const fallbackConfig = {
   apiKey: "AIzaSyAgxBDoY1hMDxJLqYo8g7Us2fuJLS64jv8",
@@ -17,20 +17,23 @@ const fallbackConfig = {
 };
 
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : fallbackConfig;
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
+const firebaseApp = initializeApp(firebaseConfig);
+const firebaseAuth = getAuth(firebaseApp);
+const firestoreDb = getFirestore(firebaseApp);
+const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 
 // -----------------------------------------------------------------------------
-// AI Service (Gemini API via Vercel Serverless Function)
+// AI Service (Gemini API 智慧路由與指數退避)
 // -----------------------------------------------------------------------------
-
-// 核心 API 呼叫函數，將請求發送至我們自己建立的 Vercel 後端 API
 const callGeminiWithBackoff = async (payload) => {
-  // 改為呼叫 Vercel 的後端路由，不需要再帶 API Key
-  const url = `/api/gemini`;
-  const delays = [1000, 2000, 4000, 8000, 16000];
+  // 智慧判斷：如果是在 Canvas 預覽環境，直連 Google API；如果是 Vercel 雲端，打向自己的後端代理
+  const isCanvasPreview = typeof window !== 'undefined' && window.location.hostname.includes('usercontent.goog');
+  const url = isCanvasPreview 
+    ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=`
+    : `/api/gemini`;
+
+  // 增加重試的等待時間，專門應對 429 請求頻率限制 (Too Many Requests)
+  const delays = [2000, 4000, 8000, 16000, 32000];
   let lastErrorMsg = "系統繁忙";
 
   for (let i = 0; i < 5; i++) {
@@ -47,21 +50,38 @@ const callGeminiWithBackoff = async (payload) => {
       
       const errText = await response.text();
       console.error(`API 請求第 ${i + 1} 次失敗 (${response.status}):`, errText);
-      lastErrorMsg = `伺服器拒絕請求 (${response.status})`;
+      
+      // 處理 Vercel 端的特定錯誤
+      if (response.status === 404 || response.status === 403 || response.status === 500) {
+         throw new Error(`伺服器錯誤 (${response.status}): 請確認 Vercel 的 GEMINI_API_KEY 與 api/gemini.js 設定。`);
+      }
+      
+      // 處理 429 請求過多限制 (Rate Limit)
+      if (response.status === 429) {
+         lastErrorMsg = "伺服器拒絕請求 (429)：AI 服務已達短時間請求次數上限。請稍候 1 分鐘後再重試 🙏";
+      } else {
+         lastErrorMsg = `伺服器拒絕請求 (${response.status})`;
+      }
       
     } catch (e) {
       console.error(`API 網路異常第 ${i + 1} 次:`, e);
-      lastErrorMsg = "網路連線異常，請確認 API 路由設定正確。";
+      if (e.message.includes("伺服器錯誤")) throw e; // 遇到致命配置錯誤直接拋出
+      if (!lastErrorMsg.includes("429")) {
+        lastErrorMsg = "網路連線異常，請確認 API 路由設定正確。";
+      }
     }
     
-    // 如果不是最後一次，則等待對應秒數後重試
-    if (i < 4) await new Promise(res => setTimeout(res, delays[i]));
+    // 若不是最後一次則等待重試
+    if (i < 4) {
+      console.log(`等待 ${delays[i]/1000} 秒後因 429/網路異常重試...`);
+      await new Promise(res => setTimeout(res, delays[i]));
+    }
   }
   
   throw new Error(lastErrorMsg);
 };
 
-// 使用 PDF.js 在前端擷取文字，避免傳送二進位檔案造成代理伺服器阻擋
+// 使用 PDF.js 在前端擷取文字，避免傳送二進位檔案
 const extractTextFromPdf = async (file) => {
   try {
     if (!window.pdfjsLib) {
@@ -104,7 +124,6 @@ const parsePDFWithGemini = async (pdfFile) => {
   【段落標記嚴格規則】：'I' (Intro/前奏), 'V' (Verse/主歌), 'V1', 'V2', 'V3', 'V4', 'PC' (Pre Chorus), 'C' (Chorus/副歌), 'C1', 'C2', 'C3', 'B' (Bridge/橋段), 'IT' (Interlude/間奏), 'FW' (Free Worship), 'L1' (最後一句), 'L2', 'L3', 'OT' (Outro), 'E' (End/結尾)。
   MapString 請使用上述代碼以 '-' 連接，例如 'I-V-C-IT-V-C-B-C-E'。`;
   
-  // 為了防止內容過長，擷取前 10000 字元
   const safeText = extractedText.substring(0, 10000);
   const userQuery = `請解析以下從歌單 PDF 中擷取出的純文字內容，並輸出要求的 JSON 格式：\n\n${safeText}`;
 
@@ -310,9 +329,9 @@ export default function App() {
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
+          await signInWithCustomToken(firebaseAuth, __initial_auth_token);
         } else {
-          await signInAnonymously(auth);
+          await signInAnonymously(firebaseAuth);
         }
       } catch (error) { 
         console.error("Firebase Auth Error:", error); 
@@ -320,7 +339,7 @@ export default function App() {
     };
     initAuth();
     
-    const unsubscribe = onAuthStateChanged(auth, setUser);
+    const unsubscribe = onAuthStateChanged(firebaseAuth, setUser);
     return () => unsubscribe();
   }, []);
 
@@ -331,12 +350,12 @@ export default function App() {
     if (!user) return;
     
     // 1. Sync Songs
-    const songsRef = collection(db, 'artifacts', appId, 'public', 'data', 'icc_songs');
+    const songsRef = collection(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs');
     const unsubSongs = onSnapshot(songsRef, (snapshot) => {
       if (snapshot.empty && songsDb.length === 0) {
         setSongsDb(MOCK_SONGS);
         setIsDbReady(true);
-        MOCK_SONGS.forEach(s => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'icc_songs', s.id), s).catch(console.error));
+        MOCK_SONGS.forEach(s => setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', s.id), s).catch(console.error));
       } else if (!snapshot.empty) {
         const loaded = snapshot.docs.map(d => d.data());
         loaded.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
@@ -350,11 +369,11 @@ export default function App() {
     });
 
     // 2. Sync Setlists
-    const setlistsRef = collection(db, 'artifacts', appId, 'public', 'data', 'icc_setlists');
+    const setlistsRef = collection(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists');
     const unsubSetlists = onSnapshot(setlistsRef, (snapshot) => {
       if (snapshot.empty && setlistsDb.length === 0) {
         setSetlistsDb(MOCK_SETLISTS);
-        MOCK_SETLISTS.forEach(s => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'icc_setlists', s.id), s).catch(console.error));
+        MOCK_SETLISTS.forEach(s => setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', s.id), s).catch(console.error));
       } else if (!snapshot.empty) {
         const loaded = snapshot.docs.map(d => d.data());
         loaded.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -383,7 +402,7 @@ export default function App() {
   useEffect(() => {
     if (searchQuery.trim() === '') { setSearchResults([]); return; }
     const q = searchQuery.toLowerCase();
-    setSearchResults(songsDb.filter(s => (s.title||'').toLowerCase().includes(q) || (s.artist||'').toLowerCase().includes(q)));
+    setSearchResults(songsDb.filter(s => String(s.title||'').toLowerCase().includes(q) || String(s.artist||'').toLowerCase().includes(q)));
   }, [searchQuery, songsDb]);
 
   const requireAdmin = (cb) => {
@@ -399,7 +418,7 @@ export default function App() {
   const filteredHomeSetlists = setlistsDb.filter(item => {
     const q = homeSearchQuery.toLowerCase();
     if (!q) return true;
-    return (item.date && item.date.includes(q)) || (item.wl && item.wl.toLowerCase().includes(q)) || (item.songs && item.songs.some(s => s.title?.toLowerCase().includes(q)));
+    return (String(item.date||'').includes(q)) || (String(item.wl||'').toLowerCase().includes(q)) || (item.songs && item.songs.some(s => String(s.title||'').toLowerCase().includes(q)));
   });
 
   // --- 歌曲熱度統計與排行榜計算 ---
@@ -444,12 +463,12 @@ export default function App() {
       if (!searchQuery && b.stats.count3Months !== a.stats.count3Months) {
         return b.stats.count3Months - a.stats.count3Months; 
       }
-      return (a.title || '').localeCompare(b.title || '');
+      return String(a.title || '').localeCompare(String(b.title || ''));
     });
   }, [songsDb, searchResults, searchQuery, songStats]);
 
   const libraryDisplaySongs = React.useMemo(() => {
-    return songsDb.filter(s => (s.title||'').toLowerCase().includes(librarySearch.toLowerCase()) || (s.artist||'').toLowerCase().includes(librarySearch.toLowerCase()))
+    return songsDb.filter(s => String(s.title||'').toLowerCase().includes(librarySearch.toLowerCase()) || String(s.artist||'').toLowerCase().includes(librarySearch.toLowerCase()))
       .map(song => ({
         ...song,
         stats: songStats[song.id] || { count3Months: 0, weeksAgo: null }
@@ -457,7 +476,7 @@ export default function App() {
         if (!librarySearch && b.stats.count3Months !== a.stats.count3Months) {
           return b.stats.count3Months - a.stats.count3Months;
         }
-        return (a.title || '').localeCompare(b.title || '');
+        return String(a.title || '').localeCompare(String(b.title || ''));
       });
   }, [songsDb, librarySearch, songStats]);
 
@@ -467,7 +486,7 @@ export default function App() {
     setIsSavingSetlist(true);
     try {
       const id = currentSetlistId || 'setlist-' + Date.now();
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'icc_setlists', id), { id, date: meta.date, wl: meta.wl, songs: setlist, updatedAt: new Date().toISOString() });
+      await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', id), { id, date: meta.date, wl: meta.wl, songs: setlist, updatedAt: new Date().toISOString() });
       setCurrentSetlistId(id); setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 3000); 
     } catch (e) { console.error("Save Setlist Error:", e); } 
     finally { setIsSavingSetlist(false); }
@@ -475,7 +494,7 @@ export default function App() {
 
   const executeDeleteSetlist = async (id) => {
     if (!user) return;
-    try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'icc_setlists', id)); } finally { setDeleteSetlistConfirmId(null); }
+    try { await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', id)); } finally { setDeleteSetlistConfirmId(null); }
   };
 
   const openSetlist = (obj) => { setCurrentSetlistId(obj.id); setMeta({ date: obj.date, wl: obj.wl }); setSetlist(obj.songs || []); setView('list'); };
@@ -555,7 +574,7 @@ export default function App() {
     setManualSource(source);
     setSaveError('');
     if (songToEdit) {
-      setEditingDbSongId(songToEdit.id); setCustomTitle(songToEdit.title); setCustomArtist(songToEdit.artist || ''); setCustomKey(songToEdit.defaultKey || 'C'); setCustomYoutubeUrl(songToEdit.youtubeId ? `https://youtu.be/${songToEdit.youtubeId}` : ''); setCustomLyrics(songToEdit.lyrics && songToEdit.lyrics.length > 0 ? songToEdit.lyrics : [{ section: 'V', text: '' }]);
+      setEditingDbSongId(songToEdit.id); setCustomTitle(songToEdit.title); setCustomArtist(songToEdit.artist || ''); setCustomKey(songToEdit.defaultKey || 'C'); setCustomYoutubeUrl(songToEdit.youtubeId ? `https://youtu.be/${songToEdit.youtubeId}` : ''); setCustomLyrics(songToEdit.lyrics && Array.isArray(songToEdit.lyrics) && songToEdit.lyrics.length > 0 ? songToEdit.lyrics : [{ section: 'V', text: '' }]);
     } else {
       setEditingDbSongId(null); setCustomTitle(initialTitle); setCustomArtist(''); setCustomKey('C'); setCustomYoutubeUrl(''); setCustomLyrics([{ section: 'V', text: '' }]);
     }
@@ -571,29 +590,29 @@ export default function App() {
     
     try {
       const sid = editingDbSongId || 'custom-' + Date.now();
-      const extractId = (url) => url?.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([^&?]{11})/)?.[1] || url;
+      const extractId = (url) => String(url || '').match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([^&?]{11})/)?.[1] || String(url || '');
       const ns = { 
         id: sid, 
         title: customTitle, 
         artist: customArtist || 'Custom', 
         defaultKey: customKey, 
         youtubeId: extractId(customYoutubeUrl) || '', 
-        lyrics: customLyrics.filter(l => l.text.trim()) 
+        lyrics: customLyrics.filter(l => String(l.text || '').trim()) 
       };
       
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'icc_songs', sid), ns);
+      await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', sid), ns);
       
       if (manualSource === 'editor') { setCurrentSong(ns); setSearchQuery(ns.title); setView('editor'); } 
       else { setView('manage'); }
     } catch (error) { 
       console.error("Firestore Save Error:", error); 
-      setSaveError('儲存至雲端時發生錯誤：' + error.message);
+      setSaveError('儲存至雲端時發生錯誤：' + String(error.message));
     } finally { 
       setIsSaving(false); 
     }
   };
 
-  const executeDeleteDbSong = async (id) => { if (!user) return; await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'icc_songs', id)); setDeleteConfirmId(null); };
+  const executeDeleteDbSong = async (id) => { if (!user) return; await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', id)); setDeleteConfirmId(null); };
 
   // --- PDF Import Logic ---
   const handlePdfUpload = (e) => {
@@ -610,48 +629,48 @@ export default function App() {
     setPdfError('');
     try {
       const result = await parsePDFWithGemini(pdfFile);
-      if (result && result.songs && result.songs.length > 0) {
+      if (result && result.songs && Array.isArray(result.songs) && result.songs.length > 0) {
         
         const newSetlistSongs = [];
         
         for (const song of result.songs) {
-          let existingSong = songsDb.find(s => s.title.replace(/\s+/g,'').toLowerCase() === song.title.replace(/\s+/g,'').toLowerCase());
+          let existingSong = songsDb.find(s => String(s.title||'').replace(/\s+/g,'').toLowerCase() === String(song.title||'').replace(/\s+/g,'').toLowerCase());
           
           if (!existingSong) {
             existingSong = {
               id: 'pdf-song-' + generateId(),
-              title: song.title,
+              title: String(song.title || '未命名'),
               artist: 'PDF 匯入',
-              defaultKey: song.key || 'C',
+              defaultKey: String(song.key || 'C'),
               youtubeId: '',
-              lyrics: song.lyrics || []
+              lyrics: Array.isArray(song.lyrics) ? song.lyrics : []
             };
             if (user) {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'icc_songs', existingSong.id), existingSong);
+              await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', existingSong.id), existingSong);
             }
           }
 
           newSetlistSongs.push({
             id: generateId(),
             songId: existingSong.id,
-            title: song.title,
-            key: song.key || existingSong.defaultKey,
-            mapString: song.mapString || '',
-            lyrics: song.lyrics && song.lyrics.length > 0 ? song.lyrics : existingSong.lyrics
+            title: String(song.title || '未命名'),
+            key: String(song.key || existingSong.defaultKey || 'C'),
+            mapString: String(song.mapString || ''),
+            lyrics: Array.isArray(song.lyrics) && song.lyrics.length > 0 ? song.lyrics : (existingSong.lyrics || [])
           });
         }
         
         const newSetlistId = 'setlist-' + Date.now();
         const setlistData = {
           id: newSetlistId,
-          date: result.date || today,
-          wl: result.wl || '',
+          date: String(result.date || today),
+          wl: String(result.wl || ''),
           songs: newSetlistSongs,
           updatedAt: new Date().toISOString()
         };
 
         if (user) {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'icc_setlists', newSetlistId), setlistData);
+          await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', newSetlistId), setlistData);
         }
         
         setShowPdfImportModal(false);
@@ -662,7 +681,7 @@ export default function App() {
         setPdfError("無法解析檔案內容，請確認檔案是否為有效的 PDF 歌單。");
       }
     } catch(e) {
-      setPdfError("解析失敗：" + e.message);
+      setPdfError(String(e.message || "解析失敗"));
     } finally {
       setIsPdfParsing(false);
     }
@@ -696,7 +715,7 @@ export default function App() {
               編輯功能目前僅開放主領使用，<br/>如需權限請洽師母 🙏
             </div>
             <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuthSubmit()} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none transition focus:border-sky-500 text-center text-lg tracking-widest mb-2 shadow-sm" placeholder="******" autoFocus />
-            {authError && <p className="text-red-500 text-xs font-bold mb-2">{authError}</p>}
+            {authError && <p className="text-red-500 text-xs font-bold mb-2">{String(authError)}</p>}
             <div className="flex justify-center gap-3 mt-6">
               <button onClick={() => setShowAuthModal(false)} className="px-5 py-2.5 text-sm text-slate-500 hover:bg-slate-100 rounded-xl transition font-bold">取消返回</button>
               <button onClick={handleAuthSubmit} className="px-6 py-2.5 text-sm bg-sky-500 hover:bg-sky-600 text-white rounded-xl transition shadow-md font-bold">確認解鎖</button>
@@ -735,7 +754,7 @@ export default function App() {
 
             {pdfError && (
               <div className="mb-6 p-4 bg-red-50 text-red-700 text-xs rounded-xl border border-red-100 font-bold flex flex-col gap-2 shadow-sm">
-                <div className="flex items-start gap-1.5"><X size={16} className="shrink-0 mt-0.5"/> <span className="leading-relaxed">{pdfError}</span></div>
+                <div className="flex items-start gap-1.5"><X size={16} className="shrink-0 mt-0.5"/> <span className="leading-relaxed">{String(pdfError)}</span></div>
               </div>
             )}
             
@@ -825,7 +844,7 @@ export default function App() {
 
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm divide-y divide-slate-100 text-left flex flex-col">
               {filteredHomeSetlists.length > 0 ? filteredHomeSetlists.map(item => {
-                const parts = item.date ? item.date.split('-') : [];
+                const parts = item.date ? String(item.date).split('-') : [];
                 return (
                   <div key={item.id} className="p-4 sm:p-6 md:p-8 hover:bg-slate-50 transition flex flex-col md:flex-row gap-4 sm:gap-6 md:gap-8 items-start md:items-center group">
                     
@@ -846,7 +865,7 @@ export default function App() {
                       <div className="flex flex-wrap gap-2">
                         {item.songs?.map((s, i) => (
                           <span key={i} className="inline-flex items-center text-[12px] sm:text-[13px] font-medium text-slate-700 bg-white border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-full shadow-sm group-hover:border-sky-200 transition">
-                            <span className="text-sky-500 font-bold mr-1.5 opacity-80">{i+1}.</span> <span className="truncate max-w-[150px] sm:max-w-none">{s.title}</span>
+                            <span className="text-sky-500 font-bold mr-1.5 opacity-80">{i+1}.</span> <span className="truncate max-w-[150px] sm:max-w-none">{String(s.title || '未命名')}</span>
                           </span>
                         ))}
                       </div>
@@ -893,10 +912,10 @@ export default function App() {
                     <div className="flex-1 w-full overflow-hidden">
                       <div className="flex items-center gap-2 sm:gap-3 mb-1">
                         <span className="bg-sky-100 text-sky-700 px-2 py-0.5 rounded text-[10px] sm:text-xs font-bold shrink-0">0{index + 1}</span>
-                        <h3 className="font-bold font-serif text-base sm:text-lg truncate">{item.title} <span className="font-sans font-normal text-slate-400 text-xs sm:text-sm">({item.key})</span></h3>
+                        <h3 className="font-bold font-serif text-base sm:text-lg truncate">{String(item.title || '未命名')} <span className="font-sans font-normal text-slate-400 text-xs sm:text-sm">({String(item.key || 'C')})</span></h3>
                       </div>
                       <div className="text-[11px] sm:text-[13px] text-blue-600 font-mono pl-8 sm:pl-9 font-bold tracking-wider overflow-x-auto custom-scrollbar pb-1">
-                        {item.mapString || '未設定段落'}
+                        {String(item.mapString || '未設定段落')}
                       </div>
                     </div>
                     <div className="flex items-center justify-end gap-1.5 sm:gap-2 pt-2 sm:pt-0 border-t sm:border-0 border-slate-50 w-full sm:w-auto">
@@ -951,7 +970,7 @@ export default function App() {
                   </div>
                   <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 mb-3 sm:mb-4 border-b pb-2 uppercase tracking-widest">歌詞預覽</h3>
                   <div className="space-y-4 sm:space-y-6 max-h-[350px] sm:max-h-[450px] overflow-y-auto pr-2 custom-scrollbar">
-                    {currentSong.lyrics?.map((s, i) => (<div key={i} className="mb-3 sm:mb-4"><span onClick={() => handleAppendTag(s.section)} title={TAG_EXPLANATIONS[s.section]} className="inline-block px-1.5 sm:px-2 py-0.5 bg-slate-100 text-slate-700 font-mono text-[9px] sm:text-[10px] font-bold rounded shadow-sm cursor-pointer hover:bg-sky-500 hover:text-white transition mb-1.5 sm:mb-2">{s.section}</span><p className="text-xs sm:text-[14px] text-slate-700 leading-relaxed whitespace-pre-wrap">{s.text}</p></div>))}
+                    {currentSong.lyrics?.map((s, i) => (<div key={i} className="mb-3 sm:mb-4"><span onClick={() => handleAppendTag(s.section)} title={TAG_EXPLANATIONS[s.section]} className="inline-block px-1.5 sm:px-2 py-0.5 bg-slate-100 text-slate-700 font-mono text-[9px] sm:text-[10px] font-bold rounded shadow-sm cursor-pointer hover:bg-sky-500 hover:text-white transition mb-1.5 sm:mb-2">{String(s.section||'')}</span><p className="text-xs sm:text-[14px] text-slate-700 leading-relaxed whitespace-pre-wrap">{String(s.text||'')}</p></div>))}
                   </div>
                 </div>
                 <div className="bg-[#FAFAFA] p-5 sm:p-6 border rounded-2xl shadow-sm h-fit order-1 lg:order-2">
@@ -978,8 +997,8 @@ export default function App() {
                       )}
 
                       <div>
-                        <h4 className="font-serif font-bold text-slate-800 text-[15px] sm:text-[17px] group-hover:text-sky-600 mb-1 leading-tight pr-12 sm:pr-14 truncate">{s.title}</h4>
-                        <p className="text-[10px] sm:text-[11px] text-slate-400 uppercase tracking-widest mb-3 sm:mb-4 truncate">{s.artist || '未知歌手'}</p>
+                        <h4 className="font-serif font-bold text-slate-800 text-[15px] sm:text-[17px] group-hover:text-sky-600 mb-1 leading-tight pr-12 sm:pr-14 truncate">{String(s.title || '未命名')}</h4>
+                        <p className="text-[10px] sm:text-[11px] text-slate-400 uppercase tracking-widest mb-3 sm:mb-4 truncate">{String(s.artist || '未知歌手')}</p>
                       </div>
                       
                       <div className="flex flex-col gap-2 sm:gap-2.5 mt-1">
@@ -1002,7 +1021,7 @@ export default function App() {
 
                         <div className="flex justify-between items-end pt-2 sm:pt-3 border-t border-slate-50 mt-1">
                           <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 flex items-center gap-1"><Music size={12}/> {s.lyrics?.length || 0} 段落</span>
-                          <span className="font-mono text-[10px] sm:text-xs font-bold text-sky-600 bg-sky-50 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg border border-sky-100">{s.defaultKey || 'C'}</span>
+                          <span className="font-mono text-[10px] sm:text-xs font-bold text-sky-600 bg-sky-50 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg border border-sky-100">{String(s.defaultKey || 'C')}</span>
                         </div>
                       </div>
                     </div>
@@ -1029,7 +1048,7 @@ export default function App() {
             
             {saveError && (
               <div className="mb-6 sm:mb-8 p-3 sm:p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-xs sm:text-sm font-bold flex items-center gap-2">
-                <X size={16} className="shrink-0"/> {saveError}
+                <X size={16} className="shrink-0"/> {String(saveError)}
               </div>
             )}
 
