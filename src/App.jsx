@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Plus, Trash2, ArrowUp, ArrowDown, Edit2, X, ChevronLeft, Download, FileText, Music, Eye, Database, BookOpen, Save, CalendarDays, User, Home, ListMusic, Lock, Unlock, Youtube, Sparkles, Wand2, Loader2, Crown } from 'lucide-react';
+import { Search, Plus, Trash2, ArrowUp, ArrowDown, Edit2, X, ChevronLeft, Download, FileText, Music, Eye, Database, BookOpen, Save, CalendarDays, User, Home, ListMusic, Lock, Unlock, Youtube, Sparkles, Wand2, Loader2, Crown, Code } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
@@ -23,154 +23,31 @@ const firestoreDb = getFirestore(firebaseApp);
 const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 
 // -----------------------------------------------------------------------------
-// AI Service (Gemini API 智慧路由與指數退避)
+// JSON 處理與清理工具 (取代原有的 PDF/AI 邏輯)
 // -----------------------------------------------------------------------------
-const callGeminiWithBackoff = async (payload) => {
-  // 智慧判斷：如果是在 Canvas 預覽環境，直連 Google API；如果是 Vercel 雲端，打向自己的後端代理
-  const isCanvasPreview = typeof window !== 'undefined' && window.location.hostname.includes('usercontent.goog');
-  const url = isCanvasPreview 
-    ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=`
-    : `/api/gemini`;
-
-  // 增加重試的等待時間，專門應對 429 請求頻率限制 (Too Many Requests)
-  const delays = [2000, 4000, 8000, 16000, 32000];
-  let lastErrorMsg = "系統繁忙";
-
-  for (let i = 0; i < 5; i++) {
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      
-      if (response.ok) {
-        return await response.json();
-      }
-      
-      const errText = await response.text();
-      console.error(`API 請求第 ${i + 1} 次失敗 (${response.status}):`, errText);
-      
-      // 處理 Vercel 端的特定錯誤
-      if (response.status === 404 || response.status === 403 || response.status === 500) {
-         throw new Error(`伺服器錯誤 (${response.status}): 請確認 Vercel 的 GEMINI_API_KEY 與 api/gemini.js 設定。`);
-      }
-      
-      // 處理 429 請求過多限制 (Rate Limit)
-      if (response.status === 429) {
-         lastErrorMsg = "伺服器拒絕請求 (429)：AI 服務已達短時間請求次數上限。請稍候 1 分鐘後再重試 🙏";
-      } else {
-         lastErrorMsg = `伺服器拒絕請求 (${response.status})`;
-      }
-      
-    } catch (e) {
-      console.error(`API 網路異常第 ${i + 1} 次:`, e);
-      if (e.message.includes("伺服器錯誤")) throw e; // 遇到致命配置錯誤直接拋出
-      if (!lastErrorMsg.includes("429")) {
-        lastErrorMsg = "網路連線異常，請確認 API 路由設定正確。";
-      }
-    }
-    
-    // 若不是最後一次則等待重試
-    if (i < 4) {
-      console.log(`等待 ${delays[i]/1000} 秒後因 429/網路異常重試...`);
-      await new Promise(res => setTimeout(res, delays[i]));
-    }
-  }
-  
-  throw new Error(lastErrorMsg);
+const cleanString = (str) => {
+  if (!str) return '';
+  return String(str)
+    .replace(/\[cite_start\]/g, '')
+    .replace(/\]+\]/g, '') // 防呆：以防未來還是不小心複製到 AI 標記
+    .replace(/ \n/g, '\n') // 移除歌詞中換行符號前多餘的空白
+    .replace(/\n /g, '\n') // 移除歌詞中換行符號後多餘的空白
+    .trim(); // 移除頭尾多餘的空白 (例如將 "F " 轉換成標準的 "F")
 };
 
-// 使用 PDF.js 在前端擷取文字，避免傳送二進位檔案
-const extractTextFromPdf = async (file) => {
-  try {
-    if (!window.pdfjsLib) {
-      await new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-        script.onload = () => {
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-          resolve();
-        };
-        script.onerror = reject;
-        document.head.appendChild(script);
-      });
-    }
-    
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    let text = '';
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(item => item.str).join(' ') + '\n';
-    }
-    return text;
-  } catch (err) {
-    console.error("PDF extraction error:", err);
-    throw new Error("PDF 讀取失敗，請確認檔案格式是否正確。");
-  }
-};
+const cleanAndParseJSON = (rawText) => {
+  // 移除 Gemini 產生的引用標記，並過濾掉特殊空白字元
+  let cleaned = rawText
+    .replace(/\[cite_start\]/g, '')
+    .replace(/\]+\]/g, '')
+    // 移除可能因為複製貼上產生的不可見零寬字元或不換行空白
+    .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ');
 
-const parsePDFWithGemini = async (pdfFile) => {
-  const extractedText = await extractTextFromPdf(pdfFile);
-  if (!extractedText || extractedText.trim().length < 10) {
-    throw new Error("無法讀取 PDF 內容，請上傳含有純文字的歌單 PDF。");
-  }
+  // 移除 Markdown 的 ```json 標記
+  cleaned = cleaned.replace(/```json/gi, '').replace(/```/g, '').trim();
 
-  const systemPrompt = `你是一個專業的教會敬拜歌單解析助手。
-  請解析使用者提供的 PDF 擷取文字，提取出歌單的日期、主領(WL)，以及每一首詩歌的資訊。
-  
-  【段落標記嚴格規則】：'I' (Intro/前奏), 'V' (Verse/主歌), 'V1', 'V2', 'V3', 'V4', 'PC' (Pre Chorus), 'C' (Chorus/副歌), 'C1', 'C2', 'C3', 'B' (Bridge/橋段), 'IT' (Interlude/間奏), 'FW' (Free Worship), 'L1' (最後一句), 'L2', 'L3', 'OT' (Outro), 'E' (End/結尾)。
-  MapString 請使用上述代碼以 '-' 連接，例如 'I-V-C-IT-V-C-B-C-E'。`;
-  
-  const safeText = extractedText.substring(0, 10000);
-  const userQuery = `請解析以下從歌單 PDF 中擷取出的純文字內容，並輸出要求的 JSON 格式：\n\n${safeText}`;
-
-  const payload = {
-    contents: [{ parts: [{ text: userQuery }] }],
-    systemInstruction: { parts: [{ text: systemPrompt }] },
-    generationConfig: { 
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: "OBJECT",
-        properties: {
-          date: { type: "STRING" },
-          wl: { type: "STRING" },
-          songs: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                title: { type: "STRING" },
-                key: { type: "STRING" },
-                mapString: { type: "STRING" },
-                lyrics: {
-                  type: "ARRAY",
-                  items: {
-                    type: "OBJECT",
-                    properties: {
-                      section: { type: "STRING" },
-                      text: { type: "STRING" }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  };
-
-  try {
-    const result = await callGeminiWithBackoff(payload);
-    let text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error("AI 未回傳有效內容");
-    return JSON.parse(text);
-  } catch (e) {
-    throw new Error(e.message || "解析失敗");
-  }
+  // 將清理乾淨的字串轉換為 JSON 物件
+  return JSON.parse(cleaned);
 };
 
 // -----------------------------------------------------------------------------
@@ -290,11 +167,10 @@ export default function App() {
 
   // --- Feature State ---
   const [showComingSoonModal, setShowComingSoonModal] = useState(false); 
-  const [showPdfImportModal, setShowPdfImportModal] = useState(false);
-  const [pdfFile, setPdfFile] = useState(null);
-  const [pdfFileName, setPdfFileName] = useState('');
-  const [isPdfParsing, setIsPdfParsing] = useState(false);
-  const [pdfError, setPdfError] = useState('');
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importError, setImportError] = useState('');
 
   // --- Editor State ---
   const [editingItem, setEditingItem] = useState(null);
@@ -614,36 +490,39 @@ export default function App() {
 
   const executeDeleteDbSong = async (id) => { if (!user) return; await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', id)); setDeleteConfirmId(null); };
 
-  // --- PDF Import Logic ---
-  const handlePdfUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setPdfFile(file);
-    setPdfFileName(file.name);
-    setPdfError('');
-  };
-
-  const handlePdfSubmit = async () => {
-    if (!pdfFile) return setPdfError("請先選擇 PDF 檔案");
-    setIsPdfParsing(true);
-    setPdfError('');
+  // --- JSON Import Logic ---
+  const handleImportSubmit = async () => {
+    if (!importText.trim()) return setImportError("請先貼上 JSON 內容");
+    setIsImporting(true);
+    setImportError('');
     try {
-      const result = await parsePDFWithGemini(pdfFile);
+      const result = cleanAndParseJSON(importText);
       if (result && result.songs && Array.isArray(result.songs) && result.songs.length > 0) {
         
         const newSetlistSongs = [];
         
         for (const song of result.songs) {
-          let existingSong = songsDb.find(s => String(s.title||'').replace(/\s+/g,'').toLowerCase() === String(song.title||'').replace(/\s+/g,'').toLowerCase());
+          // 清理各欄位殘留的任何標記 (防呆)
+          const cleanTitle = cleanString(song.title || '未命名');
+          const cleanKey = cleanString(song.key || 'C');
+          const cleanMap = cleanString(song.mapString || '');
           
+          let existingSong = songsDb.find(s => String(s.title||'').replace(/\s+/g,'').toLowerCase() === cleanTitle.replace(/\s+/g,'').toLowerCase());
+          
+          // 清理歌詞中的標記
+          const cleanLyrics = (Array.isArray(song.lyrics) ? song.lyrics : []).map(l => ({
+             section: cleanString(l.section || 'V'),
+             text: cleanString(l.text || '')
+          }));
+
           if (!existingSong) {
             existingSong = {
-              id: 'pdf-song-' + generateId(),
-              title: String(song.title || '未命名'),
-              artist: 'PDF 匯入',
-              defaultKey: String(song.key || 'C'),
+              id: 'imported-song-' + generateId(),
+              title: cleanTitle,
+              artist: 'JSON 匯入',
+              defaultKey: cleanKey,
               youtubeId: '',
-              lyrics: Array.isArray(song.lyrics) ? song.lyrics : []
+              lyrics: cleanLyrics
             };
             if (user) {
               await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', existingSong.id), existingSong);
@@ -653,18 +532,26 @@ export default function App() {
           newSetlistSongs.push({
             id: generateId(),
             songId: existingSong.id,
-            title: String(song.title || '未命名'),
-            key: String(song.key || existingSong.defaultKey || 'C'),
-            mapString: String(song.mapString || ''),
-            lyrics: Array.isArray(song.lyrics) && song.lyrics.length > 0 ? song.lyrics : (existingSong.lyrics || [])
+            title: cleanTitle,
+            key: cleanKey || existingSong.defaultKey || 'C',
+            mapString: cleanMap,
+            lyrics: cleanLyrics.length > 0 ? cleanLyrics : (existingSong.lyrics || [])
           });
         }
         
         const newSetlistId = 'setlist-' + Date.now();
+        // 清理 meta 資料的標記
+        let cleanDate = cleanString(result.date || today);
+        // 確保日期格式為正確的 YYYY-MM-DD，以便 input type="date" 能正確顯示
+        const dateMatch = cleanDate.match(/\d{4}-\d{2}-\d{2}/);
+        cleanDate = dateMatch ? dateMatch[0] : today;
+
+        const cleanWl = cleanString(result.wl || '');
+
         const setlistData = {
           id: newSetlistId,
-          date: String(result.date || today),
-          wl: String(result.wl || ''),
+          date: cleanDate,
+          wl: cleanWl,
           songs: newSetlistSongs,
           updatedAt: new Date().toISOString()
         };
@@ -673,20 +560,18 @@ export default function App() {
           await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', newSetlistId), setlistData);
         }
         
-        setShowPdfImportModal(false);
-        setPdfFile(null);
-        setPdfFileName('');
+        setShowImportModal(false);
+        setImportText('');
         openSetlist(setlistData);
       } else {
-        setPdfError("無法解析檔案內容，請確認檔案是否為有效的 PDF 歌單。");
+        setImportError("無法解析內容，請確認 JSON 格式是否包含 songs 陣列。");
       }
     } catch(e) {
-      setPdfError(String(e.message || "解析失敗"));
+      setImportError("JSON 解析失敗，請檢查格式是否正確：" + String(e.message));
     } finally {
-      setIsPdfParsing(false);
+      setIsImporting(false);
     }
   };
-
 
   const getMonthNameShort = (m) => ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][parseInt(m)-1] || m;
 
@@ -724,45 +609,44 @@ export default function App() {
         </div>
       )}
 
-      {/* PDF AI Import Modal */}
-      {showPdfImportModal && (
+      {/* JSON Import Modal */}
+      {showImportModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative overflow-hidden">
-            <div className="flex justify-between items-center mb-6">
+          <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-4 shrink-0">
               <h3 className="text-xl font-bold flex items-center gap-2 font-serif text-slate-900">
-                <Sparkles size={22} className="text-sky-500"/> AI 舊歌單匯入
+                <Code size={22} className="text-sky-500"/> 貼上 JSON 匯入歌單
               </h3>
-              <button onClick={() => !isPdfParsing && setShowPdfImportModal(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => !isImporting && setShowImportModal(false)} className="text-slate-400 hover:text-slate-600">
                 <X size={20}/>
               </button>
             </div>
             
-            <div className="text-[13px] text-slate-600 mb-6 leading-relaxed bg-sky-50 p-4 rounded-xl border border-sky-100">
-              請上傳過去使用的 <b>Song Map (PDF 格式)</b>。AI 將為您建立新歌單，並自動把沒見過的「新詩歌」建檔存入雲端詩歌庫中！✨
+            <div className="text-[13px] text-slate-600 mb-4 leading-relaxed bg-sky-50 p-4 rounded-xl border border-sky-100 shrink-0">
+              請在下方貼上由 AI 產生之 JSON 格式文字。系統會自動過濾多餘的標籤，並將新詩歌建檔存入雲端！✨
             </div>
 
-            <div className="mb-6">
-              <label className={`flex flex-col items-center justify-center w-full h-32 border-2 ${pdfFile ? 'border-sky-400 bg-sky-50' : 'border-slate-300 bg-slate-50'} border-dashed rounded-xl cursor-pointer hover:bg-slate-100 transition`}>
-                <div className="flex flex-col items-center justify-center pt-5 pb-6 px-4 text-center">
-                  <FileText className={`w-8 h-8 mb-2 ${pdfFile ? 'text-sky-500' : 'text-slate-400'}`} />
-                  <p className="text-sm font-bold text-slate-700 truncate max-w-[250px]">{pdfFileName || '點擊選擇 PDF 檔案'}</p>
-                  {!pdfFileName && <p className="text-xs text-slate-400 mt-1 font-medium">支援 .pdf 格式</p>}
-                </div>
-                <input type="file" accept="application/pdf" className="hidden" onChange={handlePdfUpload} disabled={isPdfParsing} />
-              </label>
+            <div className="mb-4 flex-1 overflow-hidden flex flex-col min-h-[300px]">
+              <textarea
+                value={importText}
+                onChange={(e) => { setImportText(e.target.value); setImportError(''); }}
+                className="w-full flex-1 p-4 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none transition focus:border-sky-500 font-mono text-sm resize-none custom-scrollbar"
+                placeholder="{\n  &quot;date&quot;: &quot;2026-01-11&quot;,\n  &quot;wl&quot;: &quot;Peggy/Howard&quot;,\n  &quot;songs&quot;: [\n    ...\n  ]\n}"
+                disabled={isImporting}
+              />
             </div>
 
-            {pdfError && (
-              <div className="mb-6 p-4 bg-red-50 text-red-700 text-xs rounded-xl border border-red-100 font-bold flex flex-col gap-2 shadow-sm">
-                <div className="flex items-start gap-1.5"><X size={16} className="shrink-0 mt-0.5"/> <span className="leading-relaxed">{String(pdfError)}</span></div>
+            {importError && (
+              <div className="mb-4 p-4 bg-red-50 text-red-700 text-xs rounded-xl border border-red-100 font-bold flex flex-col gap-2 shadow-sm shrink-0">
+                <div className="flex items-start gap-1.5"><X size={16} className="shrink-0 mt-0.5"/> <span className="leading-relaxed">{String(importError)}</span></div>
               </div>
             )}
             
-            <div className="flex gap-3">
-              <button disabled={isPdfParsing} onClick={() => setShowPdfImportModal(false)} className="flex-1 px-4 py-3 text-sm text-slate-600 rounded-xl font-bold hover:bg-slate-100 transition">取消</button>
-              <button disabled={isPdfParsing || !pdfFile} onClick={handlePdfSubmit} className="flex-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 transition disabled:opacity-50">
-                {isPdfParsing ? <Loader2 size={18} className="animate-spin"/> : <Wand2 size={16}/>} 
-                {isPdfParsing ? 'AI 深度解析中...' : '開始匯入'}
+            <div className="flex gap-3 shrink-0">
+              <button disabled={isImporting} onClick={() => setShowImportModal(false)} className="flex-1 px-4 py-3 text-sm text-slate-600 rounded-xl font-bold hover:bg-slate-100 transition">取消</button>
+              <button disabled={isImporting || !importText.trim()} onClick={handleImportSubmit} className="flex-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 transition disabled:opacity-50">
+                {isImporting ? <Loader2 size={18} className="animate-spin"/> : <Wand2 size={16}/>} 
+                {isImporting ? '處理並匯入中...' : '開始匯入'}
               </button>
             </div>
           </div>
@@ -805,9 +689,8 @@ export default function App() {
           <div className="flex flex-wrap items-center justify-center gap-4 w-full sm:w-auto">
             {view !== 'home' && <button onClick={() => setView('home')} className="hover:text-sky-600 transition flex items-center gap-1"><Home size={12}/> 返回首頁</button>}
             
-            {/* 將「AI 舊歌單匯入」功能隱藏在這裡，作為進階管理選項 */}
-            <button onClick={() => requireAdmin(() => setShowPdfImportModal(true))} className="hover:text-sky-600 transition flex items-center gap-1">
-              <FileText size={12}/> 匯入 PDF 歌單
+            <button onClick={() => requireAdmin(() => setShowImportModal(true))} className="hover:text-sky-600 transition flex items-center gap-1">
+              <Code size={12}/> 貼上 JSON 匯入歌單
             </button>
             
             <button onClick={() => requireAdmin(() => setView('manage'))} className="hover:text-sky-600 transition flex items-center gap-1"><Database size={12}/> 雲端詩歌庫</button>
