@@ -23,7 +23,7 @@ const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 
 // -----------------------------------------------------------------------------
-// AI Service (Gemini API with Search & PDF)
+// AI Service (Gemini API with Search & PDF Text Extraction)
 // -----------------------------------------------------------------------------
 const callGeminiLyricsAI = async (title, artist, ytLink) => {
   const apiKey = ""; 
@@ -60,10 +60,46 @@ const callGeminiLyricsAI = async (title, artist, ytLink) => {
   }
 };
 
-const parsePDFWithGemini = async (base64Pdf) => {
+// 使用 PDF.js 在前端擷取文字，避免傳送二進位檔案
+const extractTextFromPdf = async (file) => {
+  try {
+    if (!window.pdfjsLib) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+        script.onload = () => {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          resolve();
+        };
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+    }
+    
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let text = '';
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(item => item.str).join(' ') + '\n';
+    }
+    return text;
+  } catch (err) {
+    console.error("PDF extraction error:", err);
+    throw new Error("PDF 讀取失敗，請確認檔案格式是否正確。");
+  }
+};
+
+const parsePDFWithGemini = async (pdfFile) => {
+  const extractedText = await extractTextFromPdf(pdfFile);
+  if (!extractedText || extractedText.trim().length < 10) {
+    throw new Error("無法讀取 PDF 內容（可能是掃描圖片檔），請上傳含有純文字的歌單 PDF。");
+  }
+
   const apiKey = "";
   const prompt = `你是一個專業的教會敬拜歌單解析助手。
-  請解析這份 PDF 檔案，提取出歌單的日期、主領(WL)，以及每一首詩歌的資訊。
+  請解析以下從歌單 PDF 中擷取出的純文字內容，提取出歌單的日期、主領(WL)，以及每一首詩歌的資訊。
   
   必須輸出符合以下 JSON 格式的資料 (僅輸出 JSON，不要其他文字)：
   {
@@ -81,15 +117,15 @@ const parsePDFWithGemini = async (base64Pdf) => {
     ]
   }
   【段落標記嚴格規則】：'I' (Intro/前奏), 'V' (Verse/主歌), 'V1', 'V2', 'V3', 'V4', 'PC' (Pre Chorus), 'C' (Chorus/副歌), 'C1', 'C2', 'C3', 'B' (Bridge/橋段), 'IT' (Interlude/間奏), 'FW' (Free Worship), 'L1' (最後一句), 'L2', 'L3', 'OT' (Outro), 'E' (End/結尾)。
-  MapString 請使用上述代碼以 '-' 連接，例如 'I-V-C-IT-V-C-B-C-E'。`;
+  MapString 請使用上述代碼以 '-' 連接，例如 'I-V-C-IT-V-C-B-C-E'。
+  
+  【以下是擷取的 PDF 純文字內容】：
+  ${extractedText}`;
   
   const payload = {
     contents: [{
       role: "user",
-      parts: [
-        { text: prompt },
-        { inlineData: { mimeType: "application/pdf", data: base64Pdf } }
-      ]
+      parts: [{ text: prompt }]
     }],
     generationConfig: { responseMimeType: "application/json" }
   };
@@ -104,7 +140,7 @@ const parsePDFWithGemini = async (base64Pdf) => {
     if (!response.ok) {
       const errText = await response.text();
       console.error("API Error Response:", errText);
-      throw new Error(`伺服器拒絕請求 (${response.status})。這可能是預覽環境阻擋了 PDF 傳輸，請部署至正式主機後再試。`);
+      throw new Error(`API 請求失敗 (${response.status})`);
     }
 
     const result = await response.json();
@@ -564,14 +600,9 @@ export default function App() {
   const handlePdfUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64String = event.target.result.split(',')[1];
-      setPdfFile(base64String);
-      setPdfFileName(file.name);
-      setPdfError('');
-    };
-    reader.readAsDataURL(file);
+    setPdfFile(file);
+    setPdfFileName(file.name);
+    setPdfError('');
   };
 
   const handlePdfSubmit = async () => {
