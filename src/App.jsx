@@ -23,13 +23,13 @@ const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 
 // -----------------------------------------------------------------------------
-// AI Service (Gemini API with Exponential Backoff & PDF Text Extraction)
+// AI Service (Gemini API via Vercel Serverless Function)
 // -----------------------------------------------------------------------------
 
-// 核心 API 呼叫函數，包含環境要求的「指數退避 (Exponential Backoff)」重試機制
+// 核心 API 呼叫函數，將請求發送至我們自己建立的 Vercel 後端 API
 const callGeminiWithBackoff = async (payload) => {
-  const apiKey = ""; // 嚴格保持為空，由預覽環境代理伺服器自動注入
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  // 改為呼叫 Vercel 的後端路由，不需要再帶 API Key
+  const url = `/api/gemini`;
   const delays = [1000, 2000, 4000, 8000, 16000];
   let lastErrorMsg = "系統繁忙";
 
@@ -51,7 +51,7 @@ const callGeminiWithBackoff = async (payload) => {
       
     } catch (e) {
       console.error(`API 網路異常第 ${i + 1} 次:`, e);
-      lastErrorMsg = "網路連線異常";
+      lastErrorMsg = "網路連線異常，請確認 API 路由設定正確。";
     }
     
     // 如果不是最後一次，則等待對應秒數後重試
