@@ -23,6 +23,39 @@ const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 
 // -----------------------------------------------------------------------------
+// AI Service (Gemini API with Search)
+// -----------------------------------------------------------------------------
+const callGeminiLyricsAI = async (title, artist, ytLink) => {
+  // 為了讓預覽環境正常運作，此處恢復設定為空字串。
+  // 若您部署至 Vercel，請於您的本機原始碼中將其替換為 import.meta.env.VITE_GEMINI_API_KEY
+  const apiKey = ""; 
+  const systemPrompt = `你是一個專業的教會敬拜詩歌助手。請幫我找到這首詩歌的完整歌詞並將其結構化。要求的 JSON 格式：[{"section": "V", "text": "歌詞內容..."}, ...] 段落標記：'V', 'V1', 'V2', 'V3', 'V4', 'PC', 'C', 'C1', 'C2', 'C3', 'B'。規則：清洗吉他和弦與雜訊，僅輸出 JSON。`;
+  const userQuery = `歌名：${title}, 歌手：${artist}, 參考連結：${ytLink}。請使用 Google Search 確保歌詞準確。`;
+
+  const payload = {
+    contents: [{ parts: [{ text: userQuery }] }],
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    tools: [{ google_search: {} }],
+    generationConfig: { responseMimeType: "application/json" }
+  };
+
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error("AI Request Failed");
+    const result = await response.json();
+    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+    return JSON.parse(text);
+  } catch (e) {
+    console.error("Gemini AI Error:", e);
+    return null;
+  }
+};
+
+// -----------------------------------------------------------------------------
 // Constants & Mock Data
 // -----------------------------------------------------------------------------
 const SONG_MAP_TAGS = ['I', 'V', 'V1', 'V2', 'V3', 'V4', 'PC', 'C', 'C1', 'C2', 'C3', 'B', 'IT', 'FW', 'L1', 'L2', 'L3', 'OT', 'E'];
@@ -478,6 +511,8 @@ export default function App() {
   };
 
   const parsePDFWithGemini = async (base64Pdf) => {
+    // 為了讓預覽環境正常運作，此處恢復設定為空字串。
+    // 若您部署至 Vercel，請於您的本機原始碼中將其替換為 import.meta.env.VITE_GEMINI_API_KEY
     const apiKey = "";
     const systemPrompt = `你是一個專業的教會敬拜歌單解析助手。
     請解析這份 PDF 檔案，提取出歌單的日期、主領(WL)，以及每一首詩歌的資訊。
