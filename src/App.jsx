@@ -23,46 +23,45 @@ const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 
 // -----------------------------------------------------------------------------
-// AI Service (Gemini API with Search & PDF Text Extraction)
+// AI Service (Gemini API with Exponential Backoff & PDF Text Extraction)
 // -----------------------------------------------------------------------------
-const callGeminiLyricsAI = async (title, artist, ytLink) => {
-  const apiKey = ""; 
-  const systemPrompt = `你是一個專業的教會敬拜詩歌助手。請幫我找到這首詩歌的完整歌詞並將其結構化。要求的 JSON 格式：[{"section": "V", "text": "歌詞內容..."}, ...] 段落標記：'V', 'V1', 'V2', 'V3', 'V4', 'PC', 'C', 'C1', 'C2', 'C3', 'B'。規則：清洗吉他和弦與雜訊，僅輸出 JSON。`;
-  const userQuery = `歌名：${title}, 歌手：${artist}, 參考連結：${ytLink}。請使用 Google Search 確保歌詞準確。`;
 
-  const payload = {
-    contents: [{ parts: [{ text: userQuery }] }],
-    systemInstruction: { parts: [{ text: systemPrompt }] },
-    tools: [{ google_search: {} }],
-    generationConfig: { responseMimeType: "application/json" }
-  };
+// 核心 API 呼叫函數，包含環境要求的「指數退避 (Exponential Backoff)」重試機制
+const callGeminiWithBackoff = async (payload) => {
+  const apiKey = ""; // 嚴格保持為空，由預覽環境代理伺服器自動注入
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  const delays = [1000, 2000, 4000, 8000, 16000];
+  let lastErrorMsg = "系統繁忙";
 
-  try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    
-    if (!response.ok) {
+  for (let i = 0; i < 5; i++) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (response.ok) {
+        return await response.json();
+      }
+      
       const errText = await response.text();
-      console.error("API Error Response:", errText);
-      throw new Error(`API 請求失敗 (${response.status})`);
+      console.error(`API 請求第 ${i + 1} 次失敗 (${response.status}):`, errText);
+      lastErrorMsg = `伺服器拒絕請求 (${response.status})`;
+      
+    } catch (e) {
+      console.error(`API 網路異常第 ${i + 1} 次:`, e);
+      lastErrorMsg = "網路連線異常";
     }
     
-    const result = await response.json();
-    let text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return null;
-    
-    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    return JSON.parse(text);
-  } catch (e) {
-    console.error("Gemini AI Error:", e);
-    throw e;
+    // 如果不是最後一次，則等待對應秒數後重試
+    if (i < 4) await new Promise(res => setTimeout(res, delays[i]));
   }
+  
+  throw new Error(lastErrorMsg);
 };
 
-// 使用 PDF.js 在前端擷取文字，避免傳送二進位檔案
+// 使用 PDF.js 在前端擷取文字，避免傳送二進位檔案造成代理伺服器阻擋
 const extractTextFromPdf = async (file) => {
   try {
     if (!window.pdfjsLib) {
@@ -96,19 +95,19 @@ const extractTextFromPdf = async (file) => {
 const parsePDFWithGemini = async (pdfFile) => {
   const extractedText = await extractTextFromPdf(pdfFile);
   if (!extractedText || extractedText.trim().length < 10) {
-    throw new Error("無法讀取 PDF 內容（可能是掃描圖片檔），請上傳含有純文字的歌單 PDF。");
+    throw new Error("無法讀取 PDF 內容，請上傳含有純文字的歌單 PDF。");
   }
 
-  const apiKey = "";
   const systemPrompt = `你是一個專業的教會敬拜歌單解析助手。
   請解析使用者提供的 PDF 擷取文字，提取出歌單的日期、主領(WL)，以及每一首詩歌的資訊。
   
   【段落標記嚴格規則】：'I' (Intro/前奏), 'V' (Verse/主歌), 'V1', 'V2', 'V3', 'V4', 'PC' (Pre Chorus), 'C' (Chorus/副歌), 'C1', 'C2', 'C3', 'B' (Bridge/橋段), 'IT' (Interlude/間奏), 'FW' (Free Worship), 'L1' (最後一句), 'L2', 'L3', 'OT' (Outro), 'E' (End/結尾)。
   MapString 請使用上述代碼以 '-' 連接，例如 'I-V-C-IT-V-C-B-C-E'。`;
   
-  const userQuery = `請解析以下從歌單 PDF 中擷取出的純文字內容，並輸出要求的 JSON 格式：\n\n${extractedText}`;
+  // 為了防止內容過長，擷取前 10000 字元
+  const safeText = extractedText.substring(0, 10000);
+  const userQuery = `請解析以下從歌單 PDF 中擷取出的純文字內容，並輸出要求的 JSON 格式：\n\n${safeText}`;
 
-  // 加入嚴謹的 Schema 定義以符合系統環境要求
   const payload = {
     contents: [{ parts: [{ text: userQuery }] }],
     systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -146,26 +145,12 @@ const parsePDFWithGemini = async (pdfFile) => {
   };
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("API Error Response:", errText);
-      throw new Error(`API 請求失敗 (${response.status})`);
-    }
-
-    const result = await response.json();
+    const result = await callGeminiWithBackoff(payload);
     let text = result.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error("AI 未回傳有效內容");
-
     return JSON.parse(text);
   } catch (e) {
-    console.error("parsePDFWithGemini Error:", e);
-    throw e;
+    throw new Error(e.message || "解析失敗");
   }
 };
 
