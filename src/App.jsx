@@ -109,7 +109,7 @@ const generateId = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? 
 const ICCLogo = ({ className }) => (
   <div className={`flex flex-col items-center justify-center ${className}`}>
     <img 
-      src="[https://static.wixstatic.com/media/bdcebb_ef3ed0565d6d4ffc8f41b87e4edc0599~mv2.png/v1/fill/w_236,h_64,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ICC_Logo.png](https://static.wixstatic.com/media/bdcebb_ef3ed0565d6d4ffc8f41b87e4edc0599~mv2.png/v1/fill/w_236,h_64,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ICC_Logo.png)" 
+      src="https://static.wixstatic.com/media/bdcebb_ef3ed0565d6d4ffc8f41b87e4edc0599~mv2.png/v1/fill/w_236,h_64,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ICC_Logo.png" 
       alt="Irvine City Church Logo" className="h-8 sm:h-14 object-contain"
     />
   </div>
@@ -466,7 +466,7 @@ export default function App() {
       if (!window.html2pdf) {
         await new Promise((res, rej) => {
           const s = document.createElement('script');
-          s.src = '[https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js](https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js)';
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
           s.onload = res; s.onerror = rej; document.head.appendChild(s);
         });
       }
@@ -653,7 +653,7 @@ export default function App() {
   // Render Components
   // -----------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-[#FAFAFA] text-slate-900 font-sans relative overflow-x-hidden flex flex-col">
+    <div className="min-h-screen bg-[#FAFAFA] text-slate-900 font-sans relative flex flex-col">
 
       {/* Hidden Print Area */}
       <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
@@ -786,13 +786,13 @@ export default function App() {
                 <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-bold tracking-[0.05em] sm:tracking-[0.08em] text-slate-900 uppercase">ICC Worship Corner</h1>
                 <Music size={24} className="text-[#C4A977] hidden sm:block"/>
               </div>
-              <div className="text-slate-500 font-medium mb-4 sm:mb-6 flex flex-col items-center justify-center gap-1.5 text-sm sm:text-base font-serif">
-                <span className="flex items-center gap-2 text-slate-700">
-                  <Sparkles size={16} className="text-[#C4A977]"/>
-                  「神是個靈，所以拜祂的必須用心靈和誠實拜祂。」
-                  <Sparkles size={16} className="text-[#C4A977]"/>
+              <div className="text-slate-500 font-medium mb-4 sm:mb-6 flex flex-col items-center justify-center gap-1.5 text-sm sm:text-base font-serif text-center px-4">
+                <span className="flex items-center justify-center gap-2 text-slate-700 leading-relaxed">
+                  <Sparkles size={16} className="text-[#C4A977] shrink-0"/>
+                  <span>「你們要讚美耶和華！因歌頌我們的神為善為美；讚美的話是合宜的。」</span>
+                  <Sparkles size={16} className="text-[#C4A977] shrink-0"/>
                 </span>
-                <span className="text-[11px] sm:text-xs text-sky-600 tracking-widest">— 約翰福音 4:24 —</span>
+                <span className="text-[11px] sm:text-xs text-sky-600 tracking-widest mt-1">— 詩篇 147:1 —</span>
               </div>
             </header>
 
@@ -1065,7 +1065,7 @@ export default function App() {
             <div className="mb-8 sm:mb-10 flex flex-col sm:flex-row gap-6">
               <div className="flex-1">
                 <label className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1 uppercase tracking-widest"><Youtube size={14} className="text-red-500"/> YouTube 連結或 ID (必填)</label>
-                <input type="text" value={customYoutubeUrl} onChange={e => setCustomYoutubeUrl(e.target.value)} className="w-full border-b-2 bg-transparent p-2 text-xs sm:text-sm outline-none transition focus:border-sky-500" placeholder="[https://youtu.be/](https://youtu.be/)..." />
+                <input type="text" value={customYoutubeUrl} onChange={e => setCustomYoutubeUrl(e.target.value)} className="w-full border-b-2 bg-transparent p-2 text-xs sm:text-sm outline-none transition focus:border-sky-500" placeholder="https://youtu.be/..." />
               </div>
               <div className="flex items-end pb-2">
                 <label className="flex items-center gap-2.5 cursor-pointer group">
@@ -1203,7 +1203,7 @@ export default function App() {
             <p className="text-[9px] sm:text-[10px] text-slate-400 font-serif italic leading-relaxed mb-4 sm:mb-6 max-w-2xl px-2">
               This site is for internal worship use at Irvine City Church only.<br className="hidden sm:block"/>All lyrics and music copyrights belong to their respective original authors.
             </p>
-            <a href="[https://www.irvinecitychurch.com](https://www.irvinecitychurch.com)" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center px-5 sm:px-6 py-2 sm:py-2.5 bg-slate-900 text-white text-[10px] sm:text-[11px] font-bold uppercase tracking-widest rounded-full hover:bg-sky-600 transition shadow-md">
+            <a href="https://www.irvinecitychurch.com" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center px-5 sm:px-6 py-2 sm:py-2.5 bg-slate-900 text-white text-[10px] sm:text-[11px] font-bold uppercase tracking-widest rounded-full hover:bg-sky-600 transition shadow-md">
               Contact Us
             </a>
           </div>
