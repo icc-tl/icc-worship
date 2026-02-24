@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Plus, Trash2, ArrowUp, ArrowDown, Edit2, X, ChevronLeft, Download, FileText, Music, Eye, Database, BookOpen, Save, CalendarDays, User, Home, ListMusic, Lock, Unlock, Youtube, Sparkles, Wand2, Loader2, Crown, Code, Layers } from 'lucide-react';
+import { Search, Plus, Trash2, ArrowUp, ArrowDown, Edit2, X, ChevronLeft, ChevronRight, Download, FileText, Music, Eye, Database, BookOpen, Save, CalendarDays, User, Home, ListMusic, Lock, Unlock, Youtube, Sparkles, Wand2, Loader2, Crown, Code, Layers } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
@@ -164,6 +164,7 @@ export default function App() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [deleteSetlistConfirmId, setDeleteSetlistConfirmId] = useState(null);
   const [homeSearchQuery, setHomeSearchQuery] = useState(''); 
+  const [currentMonth, setCurrentMonth] = useState(new Date()); // Calendar View State
 
   // --- Feature State ---
   const [showComingSoonModal, setShowComingSoonModal] = useState(false); 
@@ -265,7 +266,7 @@ export default function App() {
   }, [user]);
 
   // -----------------------------------------------------------------------------
-  // UI Logic
+  // UI Logic & Helpers
   // -----------------------------------------------------------------------------
   useEffect(() => {
     function handleClickOutside(event) {
@@ -302,6 +303,57 @@ export default function App() {
     if (!q) return true;
     return (String(item.date||'').includes(q)) || (String(item.wl||'').toLowerCase().includes(q)) || (item.songs && item.songs.some(s => String(s.title||'').toLowerCase().includes(q)));
   });
+
+  // --- Calendar Logic ---
+  const prevMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+  const nextMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+
+  const renderCalendar = () => {
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    const days = [];
+    const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
+
+    weekDays.forEach(day => {
+      days.push(<div key={`h-${day}`} className="text-center text-[11px] font-bold text-slate-400 py-1.5">{day}</div>);
+    });
+
+    for (let i = 0; i < firstDay; i++) {
+      days.push(<div key={`e-${i}`} className="p-1"></div>);
+    }
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const hasSetlist = setlistsDb.some(s => s.date === dateStr);
+      const isSelected = homeSearchQuery === dateStr;
+      const isToday = dateStr === today;
+
+      days.push(
+        <div key={d} className="p-1 flex justify-center items-center">
+          <button
+            onClick={() => {
+              if (homeSearchQuery === dateStr) setHomeSearchQuery(''); // 取消過濾
+              else if (hasSetlist) setHomeSearchQuery(dateStr); // 過濾此日歌單
+            }}
+            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm transition-all relative
+              ${isSelected ? 'bg-sky-500 text-white font-bold shadow-md scale-110' :
+                hasSetlist ? 'bg-sky-50 text-sky-600 font-bold hover:bg-sky-100 border border-sky-200 cursor-pointer' :
+                isToday ? 'bg-slate-100 text-slate-900 font-bold' :
+                'text-slate-400 hover:bg-slate-50 cursor-default opacity-50'}`}
+          >
+            {d}
+            {hasSetlist && !isSelected && (
+              <span className="absolute bottom-1 w-1 h-1 bg-sky-500 rounded-full"></span>
+            )}
+          </button>
+        </div>
+      );
+    }
+    return days;
+  };
 
   // --- 歌曲熱度統計與排行榜計算 ---
   const songStats = React.useMemo(() => {
@@ -527,14 +579,12 @@ export default function App() {
         const newSetlistSongs = [];
         
         for (const song of result.songs) {
-          // 清理各欄位殘留的任何標記 (防呆)
           const cleanTitle = cleanString(song.title || '未命名');
           const cleanKey = cleanString(song.key || 'C');
           const cleanMap = cleanString(song.mapString || '');
           
           let existingSong = songsDb.find(s => String(s.title||'').replace(/\s+/g,'').toLowerCase() === cleanTitle.replace(/\s+/g,'').toLowerCase());
           
-          // 清理歌詞中的標記
           const cleanLyrics = (Array.isArray(song.lyrics) ? song.lyrics : []).map(l => ({
              section: cleanString(l.section || 'V'),
              text: cleanString(l.text || '')
@@ -566,9 +616,7 @@ export default function App() {
         }
         
         const newSetlistId = 'setlist-' + Date.now();
-        // 清理 meta 資料的標記
         let cleanDate = cleanString(result.date || today);
-        // 確保日期格式為正確的 YYYY-MM-DD，以便 input type="date" 能正確顯示
         const dateMatch = cleanDate.match(/\d{4}-\d{2}-\d{2}/);
         cleanDate = dateMatch ? dateMatch[0] : today;
 
@@ -728,71 +776,111 @@ export default function App() {
       {view === 'home' && (
         <div className="pb-20">
           <ConfirmModal isOpen={deleteSetlistConfirmId !== null} title="確定刪除？" onCancel={() => setDeleteSetlistConfirmId(null)} onConfirm={() => executeDeleteSetlist(deleteSetlistConfirmId)} />
-          <div className="max-w-6xl mx-auto p-4 sm:p-8 relative pt-6 sm:pt-4 text-center">
-            <header className="mb-10 sm:mb-12 border-b border-slate-200 pb-6 sm:pb-8 flex flex-col items-center">
+          <div className="max-w-7xl mx-auto p-4 sm:p-8 relative pt-6 sm:pt-4 text-center">
+            
+            {/* Header & Slogan */}
+            <header className="mb-8 sm:mb-12 border-b border-slate-200 pb-6 sm:pb-8 flex flex-col items-center">
               <ICCLogo className="mb-4 sm:mb-6" />
               <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mb-3 sm:mb-4 px-2">
                 <BookOpen size={24} className="text-[#C4A977] hidden sm:block"/>
                 <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-bold tracking-[0.05em] sm:tracking-[0.08em] text-slate-900 uppercase">ICC Worship Corner</h1>
                 <Music size={24} className="text-[#C4A977] hidden sm:block"/>
               </div>
-              <p className="text-slate-500 font-medium mb-4 sm:mb-6 flex items-center justify-center gap-2 text-sm sm:text-base">
-                <Sparkles size={16} className="text-sky-400"/>
-                用心靈和誠實敬拜
-                <Sparkles size={16} className="text-sky-400"/>
-              </p>
+              <div className="text-slate-500 font-medium mb-4 sm:mb-6 flex flex-col items-center justify-center gap-1.5 text-sm sm:text-base font-serif">
+                <span className="flex items-center gap-2 text-slate-700">
+                  <Sparkles size={16} className="text-[#C4A977]"/>
+                  「神是個靈，所以拜祂的必須用心靈和誠實拜祂。」
+                  <Sparkles size={16} className="text-[#C4A977]"/>
+                </span>
+                <span className="text-[11px] sm:text-xs text-sky-600 tracking-widest">— 約翰福音 4:24 —</span>
+              </div>
             </header>
 
-            <div className="flex flex-col md:flex-row justify-between items-center mb-6 sm:mb-8 gap-4 text-left">
-              <h2 className="text-xl sm:text-2xl font-bold flex items-center gap-2 font-serif text-slate-900"><CalendarDays size={24} className="text-sky-500"/> 近期歌單總覽</h2>
-              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                <input type="text" placeholder="搜尋日期、主領或歌名..." className="w-full sm:w-[350px] pl-4 pr-4 py-2.5 border rounded-xl bg-white focus:border-sky-500 shadow-sm outline-none transition text-sm sm:text-base" value={homeSearchQuery} onChange={e => setHomeSearchQuery(e.target.value)} />
-                <button onClick={() => requireAdmin(createNewSetlist)} className="bg-sky-500 hover:bg-sky-600 text-white px-6 py-2.5 rounded-xl shadow-lg font-bold text-sm whitespace-nowrap transition w-full sm:w-auto flex justify-center items-center gap-1">+ 預備歌單</button>
-              </div>
-            </div>
+            <div className="flex flex-col lg:flex-row gap-6 sm:gap-8 text-left items-start">
+              
+              {/* Main List Column */}
+              <div className="flex-1 w-full order-2 lg:order-1">
+                <div className="flex flex-col md:flex-row justify-between items-center mb-6 sm:mb-8 gap-4 text-left">
+                  <h2 className="text-xl sm:text-2xl font-bold flex items-center gap-2 font-serif text-slate-900"><ListMusic size={24} className="text-sky-500"/> 近期歌單總覽</h2>
+                  <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                    <input type="text" placeholder="搜尋日期、主領或歌名..." className="w-full sm:w-[350px] pl-4 pr-4 py-2.5 border rounded-xl bg-white focus:border-sky-500 shadow-sm outline-none transition text-sm sm:text-base" value={homeSearchQuery} onChange={e => setHomeSearchQuery(e.target.value)} />
+                    <button onClick={() => requireAdmin(createNewSetlist)} className="bg-sky-500 hover:bg-sky-600 text-white px-6 py-2.5 rounded-xl shadow-lg font-bold text-sm whitespace-nowrap transition w-full sm:w-auto flex justify-center items-center gap-1">+ 預備歌單</button>
+                  </div>
+                </div>
 
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm divide-y divide-slate-100 text-left flex flex-col">
-              {filteredHomeSetlists.length > 0 ? filteredHomeSetlists.map(item => {
-                const parts = item.date ? String(item.date).split('-') : [];
-                return (
-                  <div key={item.id} className="p-4 sm:p-6 md:p-8 hover:bg-slate-50 transition flex flex-col md:flex-row gap-4 sm:gap-6 md:gap-8 items-start md:items-center group">
-                    
-                    <div className="flex gap-4 sm:gap-5 items-center shrink-0 w-full sm:w-auto min-w-[200px] border-b sm:border-0 border-slate-100 pb-3 sm:pb-0">
-                      <div className="text-center w-14 sm:w-16">
-                        <div className="text-[10px] sm:text-[11px] font-bold text-sky-500 uppercase tracking-widest">{parts[1] ? getMonthNameShort(parts[1]) : 'MTH'}</div>
-                        <div className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 my-0.5 leading-none">{parts[2] || 'DD'}</div>
-                        <div className="text-[9px] sm:text-[10px] font-mono text-slate-400">{parts[0] || 'YYYY'}</div>
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm divide-y divide-slate-100 text-left flex flex-col">
+                  {filteredHomeSetlists.length > 0 ? filteredHomeSetlists.map(item => {
+                    const parts = item.date ? String(item.date).split('-') : [];
+                    return (
+                      <div key={item.id} className="p-4 sm:p-6 md:p-8 hover:bg-slate-50 transition flex flex-col md:flex-row gap-4 sm:gap-6 md:gap-8 items-start md:items-center group">
+                        
+                        <div className="flex gap-4 sm:gap-5 items-center shrink-0 w-full sm:w-auto min-w-[200px] border-b sm:border-0 border-slate-100 pb-3 sm:pb-0">
+                          <div className="text-center w-14 sm:w-16">
+                            <div className="text-[10px] sm:text-[11px] font-bold text-sky-500 uppercase tracking-widest">{parts[1] ? getMonthNameShort(parts[1]) : 'MTH'}</div>
+                            <div className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 my-0.5 leading-none">{parts[2] || 'DD'}</div>
+                            <div className="text-[9px] sm:text-[10px] font-mono text-slate-400">{parts[0] || 'YYYY'}</div>
+                          </div>
+                          <div className="w-px h-10 sm:h-12 bg-slate-200 group-hover:bg-sky-200 transition hidden sm:block"></div>
+                          <div className="flex flex-col gap-1">
+                            <div className="text-sm font-bold text-slate-800 flex items-center gap-1.5"><User size={14} className="text-sky-500"/> {item.wl || '未指定主領'}</div>
+                            <div className="text-[9px] sm:text-[10px] text-slate-400 italic">更新: {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '-'}</div>
+                          </div>
+                        </div>
+                        
+                        <div className="flex-1 w-full mt-2 sm:mt-0">
+                          <div className="flex flex-wrap gap-2">
+                            {item.songs?.map((s, i) => (
+                              <span key={i} className="inline-flex items-center text-[12px] sm:text-[13px] font-medium text-slate-700 bg-white border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-full shadow-sm group-hover:border-sky-200 transition">
+                                <span className="text-sky-500 font-bold mr-1.5 opacity-80">{i+1}.</span> <span className="truncate max-w-[150px] sm:max-w-none">{String(s.title || '未命名')}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-4 sm:pt-0 mt-2 sm:mt-0 border-t sm:border-0 border-slate-50">
+                          <button onClick={() => openPreviewFromHome(item)} className="flex-1 sm:flex-none px-4 sm:px-5 py-2 sm:py-2.5 bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex justify-center items-center gap-2"><Eye size={16}/> 預覽</button>
+                          <button onClick={() => requireAdmin(() => openSetlist(item))} className="p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:text-sky-600 hover:border-sky-300 transition shadow-sm" title="編輯"><Edit2 size={16}/></button>
+                          <button onClick={() => requireAdmin(() => setDeleteSetlistConfirmId(item.id))} className="p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm" title="刪除"><Trash2 size={16}/></button>
+                        </div>
                       </div>
-                      <div className="w-px h-10 sm:h-12 bg-slate-200 group-hover:bg-sky-200 transition hidden sm:block"></div>
-                      <div className="flex flex-col gap-1">
-                        <div className="text-sm font-bold text-slate-800 flex items-center gap-1.5"><User size={14} className="text-sky-500"/> {item.wl || '未指定主領'}</div>
-                        <div className="text-[9px] sm:text-[10px] text-slate-400 italic">更新: {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '-'}</div>
-                      </div>
+                    );
+                  }) : (
+                    <div className="p-16 sm:p-20 text-center text-slate-400">
+                      <ListMusic size={40} className="mx-auto mb-4 opacity-20" />
+                      <p className="text-sm">查無歌單紀錄。</p>
                     </div>
-                    
-                    <div className="flex-1 w-full mt-2 sm:mt-0">
-                      <div className="flex flex-wrap gap-2">
-                        {item.songs?.map((s, i) => (
-                          <span key={i} className="inline-flex items-center text-[12px] sm:text-[13px] font-medium text-slate-700 bg-white border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-full shadow-sm group-hover:border-sky-200 transition">
-                            <span className="text-sky-500 font-bold mr-1.5 opacity-80">{i+1}.</span> <span className="truncate max-w-[150px] sm:max-w-none">{String(s.title || '未命名')}</span>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-4 sm:pt-0 mt-2 sm:mt-0 border-t sm:border-0 border-slate-50">
-                      <button onClick={() => openPreviewFromHome(item)} className="flex-1 sm:flex-none px-4 sm:px-5 py-2 sm:py-2.5 bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex justify-center items-center gap-2"><Eye size={16}/> 預覽</button>
-                      <button onClick={() => requireAdmin(() => openSetlist(item))} className="p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:text-sky-600 hover:border-sky-300 transition shadow-sm" title="編輯"><Edit2 size={16}/></button>
-                      <button onClick={() => requireAdmin(() => setDeleteSetlistConfirmId(item.id))} className="p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm" title="刪除"><Trash2 size={16}/></button>
+                  )}
+                </div>
+              </div>
+
+              {/* Calendar Sidebar Column */}
+              <div className="w-full lg:w-[320px] shrink-0 order-1 lg:order-2 lg:sticky lg:top-24 z-10">
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 sm:p-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-serif font-bold text-slate-800 text-lg flex items-center gap-2">
+                      <CalendarDays size={18} className="text-sky-500"/> 歌單行事曆
+                    </h3>
+                    <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-100">
+                      <button onClick={prevMonth} className="p-1 hover:bg-white rounded text-slate-400 hover:text-sky-600 transition shadow-sm"><ChevronLeft size={16}/></button>
+                      <span className="text-xs font-bold text-slate-600 font-mono w-16 text-center">{currentMonth.getFullYear()} / {currentMonth.getMonth() + 1}</span>
+                      <button onClick={nextMonth} className="p-1 hover:bg-white rounded text-slate-400 hover:text-sky-600 transition shadow-sm"><ChevronRight size={16}/></button>
                     </div>
                   </div>
-                );
-              }) : (
-                <div className="p-16 sm:p-20 text-center text-slate-400">
-                  <ListMusic size={40} className="mx-auto mb-4 opacity-20" />
-                  <p className="text-sm">查無歌單紀錄。</p>
+                  
+                  <div className="grid grid-cols-7 gap-y-1">
+                    {renderCalendar()}
+                  </div>
+
+                  {homeSearchQuery && setlistsDb.some(s => s.date === homeSearchQuery) && (
+                    <div className="mt-4 pt-4 border-t border-slate-100 text-center">
+                      <button onClick={() => setHomeSearchQuery('')} className="text-xs font-bold text-slate-400 hover:text-sky-600 transition flex items-center justify-center gap-1 w-full bg-slate-50 hover:bg-sky-50 py-2 rounded-lg">
+                        <X size={14}/> 顯示全部歌單
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
+
             </div>
           </div>
         </div>
@@ -1018,7 +1106,7 @@ export default function App() {
                   <th className="p-3 sm:p-4">歌手 / 出處</th>
                   <th className="p-3 sm:p-4">近期熱度</th>
                   <th className="p-3 sm:p-4">預設調性</th>
-                  <th className="p-3 sm:p-4 text-center" title="Multitrack">MT</th>
+                  <th className="p-3 sm:p-4 text-center" title="Multitrack">Multitrack</th>
                   <th className="p-3 sm:p-4 text-right">管理操作</th>
                 </tr>
               </thead>
