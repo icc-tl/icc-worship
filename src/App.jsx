@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Plus, Trash2, ArrowUp, ArrowDown, Edit2, X, ChevronLeft, Download, FileText, Music, Eye, Database, BookOpen, Save, CalendarDays, User, Home, ListMusic, Lock, Unlock, Youtube, Sparkles, Wand2, Loader2, Crown, Code } from 'lucide-react';
+import { Search, Plus, Trash2, ArrowUp, ArrowDown, Edit2, X, ChevronLeft, Download, FileText, Music, Eye, Database, BookOpen, Save, CalendarDays, User, Home, ListMusic, Lock, Unlock, Youtube, Sparkles, Wand2, Loader2, Crown, Code, Layers } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
@@ -66,19 +66,19 @@ const TAG_EXPLANATIONS = {
 };
 
 const MOCK_SONGS = [
-  { id: '1', title: '我神我王', artist: '讚美之泉', defaultKey: 'D', youtubeId: '', lyrics: [{ section: 'V', text: '除祢以外天上有誰祢是我所愛慕\n雖我肉體漸漸衰退祢是我的力量' }, { section: 'PC', text: '走過死蔭幽谷我仍要宣揚\n祢與我同在祢使軟弱者得剛強' }, { section: 'C', text: '我神我王我信靠祢\n我的盼望我仰望祢\n祢是我心裡的力量\n我的福分直到永遠' }, { section: 'B', text: '受患難卻不被壓碎\n心困惑卻沒有絕望\n受逼迫卻不被撇棄\n被打倒卻沒有滅亡' }] },
-  { id: '2', title: '哈...哈利路亞', artist: '約書亞樂團', defaultKey: 'F', youtubeId: '', lyrics: [{ section: 'V', text: '哈利路亞 讚美聲響起\n歸給萬王之王宇宙萬物的主宰\n天使天軍全地都呼喊\n哈利路亞 讚美主聖名' }, { section: 'C', text: '哈哈利路亞我們高舉祢\n用心靈和聲音來榮耀祢\n哈哈利路亞迴響在全地\n祢恩典的呼喚和豐盛的慈愛' }] },
-  { id: '3', title: '最真實的我', artist: 'The Hope', defaultKey: 'D', youtubeId: '', lyrics: [{ section: 'V1', text: '祢全然的愛我最真實的我\n祢全然接納我即或我軟弱\n生命中的每一步有祢豐盛恩典\n使我更靠近祢' }, { section: 'V2', text: '祢全然的愛我緊緊擁抱我\n祢全然接納我永不離開我\n生命中的每一步有祢豐盛恩典\n使我更靠近祢' }, { section: 'C', text: '我只想要藏在祢翅膀蔭下\n渴求能更多停留在祢同在\n生命最大的盼望就在祢恩典之中\n祢就站立在我的身旁' }] },
-  { id: '4', title: '只為祢國祢名', artist: '真道教會', defaultKey: 'E', youtubeId: '', lyrics: [{ section: 'V1', text: '祢創造了我的生命為我眾罪釘十架\n祢的犧牲完全救贖我使我生命美麗' }, { section: 'V2', text: '聽見祢呼召的聲音 願成為祢的器皿\n我願降服用我全人全心差遣我我在這裡' }, { section: 'C', text: '世上所有金銀珍寶和這世界所提供的美好\n我願放下只為要跟隨祢回應祢榮耀呼召\n直到那日 天地廢去我的生命呼吸將要停息\n跟隨我主何等榮耀歡喜\n我獻上自己只為祢國祢名' }] },
-  { id: '7', title: '普天下歡慶', artist: 'Kua', defaultKey: 'E', youtubeId: '', lyrics: [{ section: 'V', text: '普天下當向耶和華歡呼\n你們當樂意事奉耶和華\n當來向祂歌唱' }, { section: 'C', text: '當稱謝進入祂的門當讚美進入祂的院\n當感謝祂 稱頌祂的名' }, { section: 'B', text: '來向祂歡呼來向祂跳舞' }] },
-  { id: '8', title: '不停讚美祢', artist: 'SOP', defaultKey: 'E', youtubeId: '', lyrics: [{ section: 'V', text: '時時稱頌祢向祢來歌唱\n因祢是拯救我們偉大的神' }, { section: 'C', text: '不停讚美祢 大聲讚美祢\n唯有祢配得榮耀尊貴權柄' }, { section: 'B', text: '我讚美讚美不停讚美\n跳舞跳舞不停跳舞' }] },
-  { id: '9', title: '不停湧出來', artist: '新店行道會', defaultKey: 'F', youtubeId: '', lyrics: [{ section: 'V', text: '救恩臨到我生命 我心激動不已\n罪污全被洗潔淨 我心激動不已' }, { section: 'PC', text: '在我裡面愛如泉源\n不停湧出來不停湧出來' }, { section: 'C', text: '啊我要盡情跳舞\n我所有掛慮全被取代' }] },
-  { id: '10', title: '深深地敬拜', artist: 'SOP', defaultKey: 'D', youtubeId: '', lyrics: [{ section: 'V', text: '在我心門不停地叩門\n渴望愛我每天與我同行' }, { section: 'C', text: '深深地敬拜 深深地獻上我的愛' }] },
-  { id: '13', title: '前來敬拜', artist: '讚美之泉', defaultKey: 'F', youtubeId: '', lyrics: [{ section: 'V', text: '哈利路亞哈利路亞\n前來敬拜永遠的君王' }, { section: 'C', text: '榮耀尊貴 能力權柄歸於祢' }] },
-  { id: '14', title: '獻上尊榮', artist: '讚美之泉', defaultKey: 'F', youtubeId: '', lyrics: [{ section: 'V', text: '耶穌基督 榮耀父神彰顯' }, { section: 'C', text: '獻上尊榮 尊榮' }] },
-  { id: '15', title: '永恆唯一的盼望', artist: '約書亞樂團', defaultKey: 'F', youtubeId: '', lyrics: [{ section: 'V', text: '有一位真神祂名字叫耶穌' }, { section: 'C', text: '耶穌是生命一切問題的解答' }] },
-  { id: '16', title: 'You are good', artist: 'Bethel Music', defaultKey: 'G', youtubeId: '', lyrics: [{ section: 'V1', text: 'I want to scream it out' }, { section: 'C', text: 'And I sing because you are good' }] },
-  { id: '17', title: '只想要歌唱', artist: '約書亞樂團', defaultKey: 'A', youtubeId: '', lyrics: [{ section: 'V1', text: '這絕不是表演不唱空洞語言' }, { section: 'C', text: '祢配得最高敬拜' }] }
+  { id: '1', title: '我神我王', artist: '讚美之泉', defaultKey: 'D', youtubeId: '', hasMultitrack: true, lyrics: [{ section: 'V', text: '除祢以外天上有誰祢是我所愛慕\n雖我肉體漸漸衰退祢是我的力量' }, { section: 'PC', text: '走過死蔭幽谷我仍要宣揚\n祢與我同在祢使軟弱者得剛強' }, { section: 'C', text: '我神我王我信靠祢\n我的盼望我仰望祢\n祢是我心裡的力量\n我的福分直到永遠' }, { section: 'B', text: '受患難卻不被壓碎\n心困惑卻沒有絕望\n受逼迫卻不被撇棄\n被打倒卻沒有滅亡' }] },
+  { id: '2', title: '哈...哈利路亞', artist: '約書亞樂團', defaultKey: 'F', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V', text: '哈利路亞 讚美聲響起\n歸給萬王之王宇宙萬物的主宰\n天使天軍全地都呼喊\n哈利路亞 讚美主聖名' }, { section: 'C', text: '哈哈利路亞我們高舉祢\n用心靈和聲音來榮耀祢\n哈哈利路亞迴響在全地\n祢恩典的呼喚和豐盛的慈愛' }] },
+  { id: '3', title: '最真實的我', artist: 'The Hope', defaultKey: 'D', youtubeId: '', hasMultitrack: true, lyrics: [{ section: 'V1', text: '祢全然的愛我最真實的我\n祢全然接納我即或我軟弱\n生命中的每一步有祢豐盛恩典\n使我更靠近祢' }, { section: 'V2', text: '祢全然的愛我緊緊擁抱我\n祢全然接納我永不離開我\n生命中的每一步有祢豐盛恩典\n使我更靠近祢' }, { section: 'C', text: '我只想要藏在祢翅膀蔭下\n渴求能更多停留在祢同在\n生命最大的盼望就在祢恩典之中\n祢就站立在我的身旁' }] },
+  { id: '4', title: '只為祢國祢名', artist: '真道教會', defaultKey: 'E', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V1', text: '祢創造了我的生命為我眾罪釘十架\n祢的犧牲完全救贖我使我生命美麗' }, { section: 'V2', text: '聽見祢呼召的聲音 願成為祢的器皿\n我願降服用我全人全心差遣我我在這裡' }, { section: 'C', text: '世上所有金銀珍寶和這世界所提供的美好\n我願放下只為要跟隨祢回應祢榮耀呼召\n直到那日 天地廢去我的生命呼吸將要停息\n跟隨我主何等榮耀歡喜\n我獻上自己只為祢國祢名' }] },
+  { id: '7', title: '普天下歡慶', artist: 'Kua', defaultKey: 'E', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V', text: '普天下當向耶和華歡呼\n你們當樂意事奉耶和華\n當來向祂歌唱' }, { section: 'C', text: '當稱謝進入祂的門當讚美進入祂的院\n當感謝祂 稱頌祂的名' }, { section: 'B', text: '來向祂歡呼來向祂跳舞' }] },
+  { id: '8', title: '不停讚美祢', artist: 'SOP', defaultKey: 'E', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V', text: '時時稱頌祢向祢來歌唱\n因祢是拯救我們偉大的神' }, { section: 'C', text: '不停讚美祢 大聲讚美祢\n唯有祢配得榮耀尊貴權柄' }, { section: 'B', text: '我讚美讚美不停讚美\n跳舞跳舞不停跳舞' }] },
+  { id: '9', title: '不停湧出來', artist: '新店行道會', defaultKey: 'F', youtubeId: '', hasMultitrack: true, lyrics: [{ section: 'V', text: '救恩臨到我生命 我心激動不已\n罪污全被洗潔淨 我心激動不已' }, { section: 'PC', text: '在我裡面愛如泉源\n不停湧出來不停湧出來' }, { section: 'C', text: '啊我要盡情跳舞\n我所有掛慮全被取代' }] },
+  { id: '10', title: '深深地敬拜', artist: 'SOP', defaultKey: 'D', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V', text: '在我心門不停地叩門\n渴望愛我每天與我同行' }, { section: 'C', text: '深深地敬拜 深深地獻上我的愛' }] },
+  { id: '13', title: '前來敬拜', artist: '讚美之泉', defaultKey: 'F', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V', text: '哈利路亞哈利路亞\n前來敬拜永遠的君王' }, { section: 'C', text: '榮耀尊貴 能力權柄歸於祢' }] },
+  { id: '14', title: '獻上尊榮', artist: '讚美之泉', defaultKey: 'F', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V', text: '耶穌基督 榮耀父神彰顯' }, { section: 'C', text: '獻上尊榮 尊榮' }] },
+  { id: '15', title: '永恆唯一的盼望', artist: '約書亞樂團', defaultKey: 'F', youtubeId: '', hasMultitrack: true, lyrics: [{ section: 'V', text: '有一位真神祂名字叫耶穌' }, { section: 'C', text: '耶穌是生命一切問題的解答' }] },
+  { id: '16', title: 'You are good', artist: 'Bethel Music', defaultKey: 'G', youtubeId: '', hasMultitrack: true, lyrics: [{ section: 'V1', text: 'I want to scream it out' }, { section: 'C', text: 'And I sing because you are good' }] },
+  { id: '17', title: '只想要歌唱', artist: '約書亞樂團', defaultKey: 'A', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V1', text: '這絕不是表演不唱空洞語言' }, { section: 'C', text: '祢配得最高敬拜' }] }
 ];
 
 const MOCK_SETLISTS = [
@@ -187,6 +187,7 @@ export default function App() {
   const [customArtist, setCustomArtist] = useState('');
   const [customKey, setCustomKey] = useState('C');
   const [customYoutubeUrl, setCustomYoutubeUrl] = useState('');
+  const [customHasMultitrack, setCustomHasMultitrack] = useState(false);
   const [customLyrics, setCustomLyrics] = useState([{ section: 'V', text: '' }]);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -278,7 +279,12 @@ export default function App() {
   useEffect(() => {
     if (searchQuery.trim() === '') { setSearchResults([]); return; }
     const q = searchQuery.toLowerCase();
-    setSearchResults(songsDb.filter(s => String(s.title||'').toLowerCase().includes(q) || String(s.artist||'').toLowerCase().includes(q)));
+    setSearchResults(songsDb.filter(s => {
+      const titleMatch = String(s.title||'').toLowerCase().includes(q);
+      const artistMatch = String(s.artist||'').toLowerCase().includes(q);
+      const mtMatch = (q === 'mt' || q === 'multitrack' || q === 'multitracks') && s.hasMultitrack;
+      return titleMatch || artistMatch || mtMatch;
+    }));
   }, [searchQuery, songsDb]);
 
   const requireAdmin = (cb) => {
@@ -344,7 +350,13 @@ export default function App() {
   }, [songsDb, searchResults, searchQuery, songStats]);
 
   const libraryDisplaySongs = React.useMemo(() => {
-    return songsDb.filter(s => String(s.title||'').toLowerCase().includes(librarySearch.toLowerCase()) || String(s.artist||'').toLowerCase().includes(librarySearch.toLowerCase()))
+    return songsDb.filter(s => {
+        const q = librarySearch.toLowerCase();
+        const titleMatch = String(s.title||'').toLowerCase().includes(q);
+        const artistMatch = String(s.artist||'').toLowerCase().includes(q);
+        const mtMatch = (q === 'mt' || q === 'multitrack' || q === 'multitracks') && s.hasMultitrack;
+        return titleMatch || artistMatch || mtMatch;
+      })
       .map(song => ({
         ...song,
         stats: songStats[song.id] || { count3Months: 0, weeksAgo: null }
@@ -382,7 +394,7 @@ export default function App() {
     setEditingItem(item);
     if (item) {
       const dbSong = songsDb.find(s => s.id === item.songId);
-      setCurrentSong(dbSong || { id: item.songId, title: item.title, lyrics: item.lyrics });
+      setCurrentSong(dbSong || { id: item.songId, title: item.title, lyrics: item.lyrics, hasMultitrack: item.hasMultitrack });
       setCurrentKey(item.key || 'C');
       setCurrentMap(item.mapString || '');
       setSearchQuery(item.title || '');
@@ -450,9 +462,21 @@ export default function App() {
     setManualSource(source);
     setSaveError('');
     if (songToEdit) {
-      setEditingDbSongId(songToEdit.id); setCustomTitle(songToEdit.title); setCustomArtist(songToEdit.artist || ''); setCustomKey(songToEdit.defaultKey || 'C'); setCustomYoutubeUrl(songToEdit.youtubeId ? `https://youtu.be/${songToEdit.youtubeId}` : ''); setCustomLyrics(songToEdit.lyrics && Array.isArray(songToEdit.lyrics) && songToEdit.lyrics.length > 0 ? songToEdit.lyrics : [{ section: 'V', text: '' }]);
+      setEditingDbSongId(songToEdit.id); 
+      setCustomTitle(songToEdit.title); 
+      setCustomArtist(songToEdit.artist || ''); 
+      setCustomKey(songToEdit.defaultKey || 'C'); 
+      setCustomYoutubeUrl(songToEdit.youtubeId ? `https://youtu.be/${songToEdit.youtubeId}` : ''); 
+      setCustomHasMultitrack(songToEdit.hasMultitrack || false);
+      setCustomLyrics(songToEdit.lyrics && Array.isArray(songToEdit.lyrics) && songToEdit.lyrics.length > 0 ? songToEdit.lyrics : [{ section: 'V', text: '' }]);
     } else {
-      setEditingDbSongId(null); setCustomTitle(initialTitle); setCustomArtist(''); setCustomKey('C'); setCustomYoutubeUrl(''); setCustomLyrics([{ section: 'V', text: '' }]);
+      setEditingDbSongId(null); 
+      setCustomTitle(initialTitle); 
+      setCustomArtist(''); 
+      setCustomKey('C'); 
+      setCustomYoutubeUrl(''); 
+      setCustomHasMultitrack(false);
+      setCustomLyrics([{ section: 'V', text: '' }]);
     }
     setView('manual'); setShowDropdown(false);
   };
@@ -473,6 +497,7 @@ export default function App() {
         artist: customArtist || 'Custom', 
         defaultKey: customKey, 
         youtubeId: extractId(customYoutubeUrl) || '', 
+        hasMultitrack: customHasMultitrack,
         lyrics: customLyrics.filter(l => String(l.text || '').trim()) 
       };
       
@@ -522,6 +547,7 @@ export default function App() {
               artist: 'JSON 匯入',
               defaultKey: cleanKey,
               youtubeId: '',
+              hasMultitrack: false,
               lyrics: cleanLyrics
             };
             if (user) {
@@ -867,15 +893,15 @@ export default function App() {
               <div className="p-5 sm:p-8 bg-slate-50/50">
                 <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 mb-3 sm:mb-4 border-b pb-2 uppercase tracking-widest flex flex-col sm:flex-row justify-between items-start sm:items-end gap-2">
                   <span>{searchQuery ? '搜尋結果' : '瀏覽雲端詩歌庫 (全庫)'}</span>
-                  {!searchQuery && <span className="text-[9px] font-normal flex items-center gap-1 text-slate-400 bg-white border border-slate-200 shadow-sm px-2 py-0.5 rounded-full"><Crown size={10} className="text-orange-400"/> 依近3個月熱度排序</span>}
+                  {!searchQuery && <span className="text-[9px] font-normal flex items-center gap-1 text-[#C4A977] bg-[#FAF8F5] border border-[#E8DCC4] shadow-sm px-2 py-0.5 rounded-full"><Crown size={10} fill="currentColor"/> 依近3個月熱度排序</span>}
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 max-h-[400px] sm:max-h-[500px] overflow-y-auto pr-2 custom-scrollbar pb-4">
                   {displaySongs.map((s, index) => (
                     <div key={s.id} onClick={() => handleSelectSong(s)} className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 cursor-pointer hover:border-sky-400 hover:shadow-lg transition-all group flex flex-col justify-between relative overflow-hidden">
                       
                       {s.stats.count3Months > 0 && index < 3 && !searchQuery && (
-                        <div className="absolute top-0 right-0 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[8px] sm:text-[9px] font-bold px-2.5 sm:px-3 py-1 rounded-bl-xl shadow-sm flex items-center gap-1">
-                          <Crown size={10} /> 推薦熱門
+                        <div className="absolute top-0 right-0 bg-[#FAF8F5] text-[#C4A977] text-[8px] sm:text-[9px] font-bold px-3 py-1.5 rounded-bl-xl border-b border-l border-[#E8DCC4] shadow-sm flex items-center gap-1.5">
+                          <Crown size={12} fill="currentColor" /> 近期熱門
                         </div>
                       )}
 
@@ -887,8 +913,8 @@ export default function App() {
                       <div className="flex flex-col gap-2 sm:gap-2.5 mt-1">
                         <div className="flex flex-wrap gap-1.5">
                           {s.stats.count3Months > 0 ? (
-                            <span className="bg-red-50 text-red-600 text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-1 rounded-md font-bold border border-red-100 flex items-center gap-1">
-                              🔥 近三月: {s.stats.count3Months} 次
+                            <span className="bg-[#FAF8F5] text-[#C4A977] text-[9px] sm:text-[10px] px-2 py-1 rounded-md font-bold border border-[#E8DCC4] flex items-center gap-1.5 w-fit whitespace-nowrap shadow-sm">
+                              <Crown size={12} fill="currentColor" className="opacity-80"/> 三月內唱過: {s.stats.count3Months} 次
                             </span>
                           ) : (
                             <span className="bg-slate-50 text-slate-400 text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-1 rounded-md font-medium border border-slate-100 flex items-center gap-1">
@@ -896,14 +922,17 @@ export default function App() {
                             </span>
                           )}
                           {s.stats.weeksAgo !== null && (
-                            <span className="bg-sky-50 text-sky-600 text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-1 rounded-md font-bold border border-sky-100 flex items-center gap-1">
-                              🕒 {s.stats.weeksAgo === 0 ? '本週剛唱' : `${s.stats.weeksAgo} 週前`}
+                            <span className="bg-slate-50 text-slate-500 text-[9px] sm:text-[10px] px-2 py-1 rounded-md font-medium border border-slate-200 flex items-center gap-1.5 w-fit whitespace-nowrap shadow-sm">
+                              <CalendarDays size={12} className="opacity-70" /> {s.stats.weeksAgo === 0 ? '本週剛唱過' : `${s.stats.weeksAgo} 週前唱過`}
                             </span>
                           )}
                         </div>
 
                         <div className="flex justify-between items-end pt-2 sm:pt-3 border-t border-slate-50 mt-1">
-                          <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 flex items-center gap-1"><Music size={12}/> {s.lyrics?.length || 0} 段落</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 flex items-center gap-1"><Music size={12}/> {s.lyrics?.length || 0} 段落</span>
+                            {s.hasMultitrack && <span className="text-[9px] sm:text-[10px] font-bold text-indigo-500 flex items-center gap-1"><Layers size={12}/> MT</span>}
+                          </div>
                           <span className="font-mono text-[10px] sm:text-xs font-bold text-sky-600 bg-sky-50 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg border border-sky-100">{String(s.defaultKey || 'C')}</span>
                         </div>
                       </div>
@@ -940,7 +969,23 @@ export default function App() {
               <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">歌手 / 出處</label><input type="text" value={customArtist} onChange={e => setCustomArtist(e.target.value)} className="w-full border-b-2 bg-transparent focus:border-sky-500 p-2 outline-none transition text-sm sm:text-base" /></div>
               <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">預設調性</label><select value={customKey} onChange={e => setCustomKey(e.target.value)} className="w-full border-b-2 bg-transparent p-2 transition outline-none focus:border-sky-500 text-sm sm:text-base">{KEYS.map(k => <option key={k} value={k}>{k}</option>)}</select></div>
             </div>
-            <div className="mb-8 sm:mb-10"><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1 uppercase tracking-widest"><Youtube size={14} className="text-red-500"/> YouTube 連結或 ID (必填)</label><input type="text" value={customYoutubeUrl} onChange={e => setCustomYoutubeUrl(e.target.value)} className="w-full border-b-2 bg-transparent p-2 text-xs sm:text-sm outline-none transition focus:border-sky-500" placeholder="https://youtu.be/..." /></div>
+            
+            <div className="mb-8 sm:mb-10 flex flex-col sm:flex-row gap-6">
+              <div className="flex-1">
+                <label className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1 uppercase tracking-widest"><Youtube size={14} className="text-red-500"/> YouTube 連結或 ID (必填)</label>
+                <input type="text" value={customYoutubeUrl} onChange={e => setCustomYoutubeUrl(e.target.value)} className="w-full border-b-2 bg-transparent p-2 text-xs sm:text-sm outline-none transition focus:border-sky-500" placeholder="https://youtu.be/..." />
+              </div>
+              <div className="flex items-end pb-2">
+                <label className="flex items-center gap-2.5 cursor-pointer group">
+                  <div className="relative flex items-center justify-center">
+                    <input type="checkbox" checked={customHasMultitrack} onChange={e => setCustomHasMultitrack(e.target.checked)} className="peer appearance-none w-5 h-5 border-2 border-slate-300 rounded-md checked:bg-indigo-500 checked:border-indigo-500 transition-all cursor-pointer shadow-sm" />
+                    <Layers size={12} className="absolute text-white opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" />
+                  </div>
+                  <span className="text-xs sm:text-sm font-bold text-slate-600 uppercase tracking-widest group-hover:text-indigo-600 transition">支援 Multitrack</span>
+                </label>
+              </div>
+            </div>
+
             <div className="mb-8 sm:mb-10"><div className="flex justify-between items-end border-b pb-2 mb-6 sm:mb-8"><h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest">歌詞段落管理</h3></div><div className="space-y-4 sm:space-y-6">{customLyrics.map((l, i) => (<div key={i} className="flex flex-col sm:flex-row gap-3 sm:gap-5 items-start group transition hover:bg-slate-50/50 p-3 rounded-xl border border-transparent hover:border-slate-100"><div className="w-full sm:w-auto shrink-0 flex sm:block justify-between items-center"><select value={l.section} onChange={e => { const nl = [...customLyrics]; nl[i].section = e.target.value; setCustomLyrics(nl); }} className="w-20 sm:w-24 p-1.5 sm:p-2 border rounded-lg font-mono text-xs sm:text-sm shadow-sm bg-white focus:border-sky-500 outline-none">{SONG_MAP_TAGS.map(t => <option key={t} value={t}>{t}</option>)}</select><div className="text-[9px] text-slate-400 mt-1 font-mono hidden sm:block text-center">{TAG_EXPLANATIONS[l.section]?.split(' ')[0]}</div><button onClick={() => { const nl = [...customLyrics]; nl.splice(i, 1); setCustomLyrics(nl); }} className="sm:hidden p-1.5 text-slate-300 hover:text-red-600 transition bg-white border rounded shadow-sm"><Trash2 size={16}/></button></div><textarea value={l.text} onChange={e => { const nl = [...customLyrics]; nl[i].text = e.target.value; setCustomLyrics(nl); }} rows={3} className="w-full flex-1 p-3 sm:p-4 border rounded-xl font-sans text-sm shadow-sm outline-none focus:border-sky-500 transition" placeholder="在此貼上歌詞內容..." /><button onClick={() => { const nl = [...customLyrics]; nl.splice(i, 1); setCustomLyrics(nl); }} className="hidden sm:block p-2 text-slate-200 hover:text-red-600 transition self-center"><Trash2 size={20}/></button></div>))}</div><button onClick={() => setCustomLyrics([...customLyrics, { section: 'V', text: '' }])} className="mt-6 sm:mt-8 flex items-center gap-1.5 text-xs font-bold uppercase text-sky-600 transition hover:text-sky-500 bg-sky-50 px-4 py-2 rounded-lg w-fit">+ 新增段落</button></div>
             <div className="flex justify-end pt-6 sm:pt-8 border-t"><button onClick={handleSaveCustomSong} disabled={!customTitle.trim() || isSaving} className="w-full sm:w-auto px-8 sm:px-12 py-3.5 sm:py-4 bg-sky-500 hover:bg-sky-600 text-white font-serif rounded-xl shadow-xl transition active:scale-95 disabled:opacity-30 tracking-widest font-bold text-sm sm:text-base">{isSaving ? '儲存中...' : (editingDbSongId ? '確認儲存更新' : '確認儲存至雲端資料庫')}</button></div>
           </div>
@@ -973,6 +1018,7 @@ export default function App() {
                   <th className="p-3 sm:p-4">歌手 / 出處</th>
                   <th className="p-3 sm:p-4">近期熱度</th>
                   <th className="p-3 sm:p-4">預設調性</th>
+                  <th className="p-3 sm:p-4 text-center" title="Multitrack">MT</th>
                   <th className="p-3 sm:p-4 text-right">管理操作</th>
                 </tr>
               </thead>
@@ -982,8 +1028,8 @@ export default function App() {
                     <td className="p-3 sm:p-4">
                       <div className="flex flex-col items-start gap-1">
                         {s.stats.count3Months > 0 && index < 3 && !librarySearch && (
-                          <span className="bg-gradient-to-r from-orange-400 to-red-500 text-white text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded shadow-sm flex items-center gap-1 w-fit font-bold">
-                            <Crown size={10} /> 推薦熱門
+                          <span className="bg-[#FAF8F5] text-[#C4A977] border border-[#E8DCC4] text-[8px] sm:text-[9px] px-2 py-0.5 rounded-md shadow-sm flex items-center gap-1.5 w-fit font-bold">
+                            <Crown size={10} fill="currentColor" /> 近期熱門
                           </span>
                         )}
                         <span className="font-serif font-bold text-slate-800 text-sm sm:text-lg group-hover:text-sky-600 whitespace-nowrap sm:whitespace-normal">{s.title}</span>
@@ -993,8 +1039,8 @@ export default function App() {
                     <td className="p-3 sm:p-4">
                       <div className="flex flex-col gap-1.5 items-start">
                         {s.stats.count3Months > 0 ? (
-                          <span className="bg-red-50 text-red-600 text-[9px] sm:text-[10px] px-2 py-1 rounded-md font-bold border border-red-100 flex items-center gap-1 w-fit whitespace-nowrap">
-                            🔥 近三月: {s.stats.count3Months} 次
+                          <span className="bg-[#FAF8F5] text-[#C4A977] text-[9px] sm:text-[10px] px-2 py-1 rounded-md font-bold border border-[#E8DCC4] flex items-center gap-1.5 w-fit whitespace-nowrap shadow-sm">
+                            <Crown size={12} fill="currentColor" className="opacity-80"/> 三月內唱過: {s.stats.count3Months} 次
                           </span>
                         ) : (
                           <span className="bg-slate-50 text-slate-400 text-[9px] sm:text-[10px] px-2 py-1 rounded-md font-medium border border-slate-100 flex items-center gap-1 w-fit whitespace-nowrap">
@@ -1002,13 +1048,26 @@ export default function App() {
                           </span>
                         )}
                         {s.stats.weeksAgo !== null && (
-                          <span className="bg-sky-50 text-sky-600 text-[9px] sm:text-[10px] px-2 py-1 rounded-md font-bold border border-sky-100 flex items-center gap-1 w-fit whitespace-nowrap">
-                            🕒 {s.stats.weeksAgo === 0 ? '本週剛唱' : `${s.stats.weeksAgo} 週前`}
+                          <span className="bg-slate-50 text-slate-500 text-[9px] sm:text-[10px] px-2 py-1 rounded-md font-medium border border-slate-200 flex items-center gap-1.5 w-fit whitespace-nowrap shadow-sm">
+                            <CalendarDays size={12} className="opacity-70" /> {s.stats.weeksAgo === 0 ? '本週剛唱過' : `${s.stats.weeksAgo} 週前唱過`}
                           </span>
                         )}
                       </div>
                     </td>
-                    <td className="p-3 sm:p-4 font-mono text-xs sm:text-sm text-slate-400">{s.defaultKey}</td>
+                    <td className="p-3 sm:p-4 font-mono text-xs sm:text-sm text-slate-400">
+                      <div className="flex flex-col items-start gap-1.5">
+                        <span className="bg-sky-50 text-sky-600 px-2 py-0.5 rounded border border-sky-100 font-bold">{s.defaultKey}</span>
+                      </div>
+                    </td>
+                    <td className="p-3 sm:p-4 text-center">
+                      {s.hasMultitrack ? (
+                        <div className="flex justify-center" title="支援 Multitrack">
+                          <Layers size={18} className="text-indigo-500 drop-shadow-sm" />
+                        </div>
+                      ) : (
+                        <span className="text-slate-200 font-medium">-</span>
+                      )}
+                    </td>
                     <td className="p-3 sm:p-4 text-right whitespace-nowrap">
                       <div className="flex justify-end gap-1">
                         <button onClick={() => requireAdmin(() => openManualEntry(s, '', 'manage'))} className="p-2 sm:p-2.5 hover:bg-white rounded-lg text-slate-400 hover:text-sky-600 transition shadow-sm border border-transparent hover:border-slate-100"><Edit2 size={16}/></button>
