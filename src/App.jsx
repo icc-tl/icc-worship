@@ -23,30 +23,25 @@ const firestoreDb = getFirestore(firebaseApp);
 const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 
 // -----------------------------------------------------------------------------
-// JSON 處理與清理工具 (取代原有的 PDF/AI 邏輯)
+// JSON 處理與清理工具
 // -----------------------------------------------------------------------------
 const cleanString = (str) => {
   if (!str) return '';
   return String(str)
     .replace(/\[cite_start\]/g, '')
-    .replace(/\]+\]/g, '') // 防呆：以防未來還是不小心複製到 AI 標記
-    .replace(/ \n/g, '\n') // 移除歌詞中換行符號前多餘的空白
-    .replace(/\n /g, '\n') // 移除歌詞中換行符號後多餘的空白
-    .trim(); // 移除頭尾多餘的空白 (例如將 "F " 轉換成標準的 "F")
+    .replace(/\[cite_end\]/g, '') 
+    .replace(/ \n/g, '\n')
+    .replace(/\n /g, '\n')
+    .trim(); 
 };
 
 const cleanAndParseJSON = (rawText) => {
-  // 移除 Gemini 產生的引用標記，並過濾掉特殊空白字元
   let cleaned = rawText
     .replace(/\[cite_start\]/g, '')
-    .replace(/\]+\]/g, '')
-    // 移除可能因為複製貼上產生的不可見零寬字元或不換行空白
+    .replace(/\[cite_end\]/g, '')
     .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ');
 
-  // 移除 Markdown 的 ```json 標記
   cleaned = cleaned.replace(/```json/gi, '').replace(/```/g, '').trim();
-
-  // 將清理乾淨的字串轉換為 JSON 物件
   return JSON.parse(cleaned);
 };
 
@@ -64,6 +59,14 @@ const TAG_EXPLANATIONS = {
   'FW': '自由敬拜 (Free Worship)', 'L1': '最後一句 (Last Line)', 'L2': '最後兩句 (Last 2 Lines)',
   'L3': '最後三句 (Last 3 Lines)', 'OT': '尾奏 (Outro)', 'E': '結尾 (Ending)'
 };
+
+const QUICK_FILTERS = [
+  { label: '讚美之泉', query: '讚美之泉' },
+  { label: '約書亞', query: '約書亞' },
+  { label: 'KUA', query: 'KUA' },
+  { label: 'SOP', query: 'SOP' },
+  { label: 'Multitrack', query: 'mt' }
+];
 
 const MOCK_SONGS = [
   { id: '1', title: '我神我王', artist: '讚美之泉', defaultKey: 'D', youtubeId: '', hasMultitrack: true, lyrics: [{ section: 'V', text: '除祢以外天上有誰祢是我所愛慕\n雖我肉體漸漸衰退祢是我的力量' }, { section: 'PC', text: '走過死蔭幽谷我仍要宣揚\n祢與我同在祢使軟弱者得剛強' }, { section: 'C', text: '我神我王我信靠祢\n我的盼望我仰望祢\n祢是我心裡的力量\n我的福分直到永遠' }, { section: 'B', text: '受患難卻不被壓碎\n心困惑卻沒有絕望\n受逼迫卻不被撇棄\n被打倒卻沒有滅亡' }] },
@@ -83,7 +86,7 @@ const MOCK_SONGS = [
 
 const MOCK_SETLISTS = [
   {
-    id: 'mock-setlist-1', date: '2025-02-09', wl: 'Jovy and Rudy', updatedAt: new Date().toISOString(),
+    id: 'mock-setlist-1', date: '2025-02-09', wl: 'Jovy and Rudy', youtubePlaylistUrl: 'https://youtube.com/playlist?list=PLexample123', updatedAt: new Date().toISOString(),
     songs: [
       { id: 'm1', songId: '1', title: '我神我王', key: 'D', mapString: 'I-V(Jovy)-V(Alex)-PC-C-C-V-PC-C-C-B-B-B-C-C-L1', lyrics: MOCK_SONGS.find(s=>s.id==='1')?.lyrics || [] },
       { id: 'm2', songId: '2', title: '哈...哈利路亞', key: 'F', mapString: 'V-C-V-C-I-C-C-V-C-L1-L1', lyrics: MOCK_SONGS.find(s=>s.id==='2')?.lyrics || [] },
@@ -92,7 +95,7 @@ const MOCK_SETLISTS = [
     ]
   },
   {
-    id: 'mock-setlist-2', date: '2026-01-09', wl: '佳綺師母/Rudy', updatedAt: new Date().toISOString(),
+    id: 'mock-setlist-2', date: '2026-01-09', wl: '佳綺師母/Rudy', youtubePlaylistUrl: '', updatedAt: new Date().toISOString(),
     songs: [
       { id: 'm5', songId: '7', title: '普天下歡慶', key: 'E', mapString: 'I-V-C-V-C-C-I-B-B-B-B-C-C-L1', lyrics: MOCK_SONGS.find(s=>s.id==='7')?.lyrics || [] },
       { id: 'm6', songId: '8', title: '不停讚美祢', key: 'E', mapString: 'I-V-C-V-C- С-В-В-I- C-C', lyrics: MOCK_SONGS.find(s=>s.id==='8')?.lyrics || [] },
@@ -155,7 +158,7 @@ export default function App() {
   const [setlist, setSetlist] = useState([]);
   
   const today = new Date().toISOString().split('T')[0];
-  const [meta, setMeta] = useState({ date: today, wl: '' });
+  const [meta, setMeta] = useState({ date: today, wl: '', youtubePlaylistUrl: '' });
   const [isGenerating, setIsGenerating] = useState(false);
 
   // --- Setlist Management State ---
@@ -164,7 +167,7 @@ export default function App() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [deleteSetlistConfirmId, setDeleteSetlistConfirmId] = useState(null);
   const [homeSearchQuery, setHomeSearchQuery] = useState(''); 
-  const [currentMonth, setCurrentMonth] = useState(new Date()); // Calendar View State
+  const [currentMonth, setCurrentMonth] = useState(new Date());
 
   // --- Feature State ---
   const [showComingSoonModal, setShowComingSoonModal] = useState(false); 
@@ -426,7 +429,14 @@ export default function App() {
     setIsSavingSetlist(true);
     try {
       const id = currentSetlistId || 'setlist-' + Date.now();
-      await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', id), { id, date: meta.date, wl: meta.wl, songs: setlist, updatedAt: new Date().toISOString() });
+      await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', id), { 
+        id, 
+        date: meta.date, 
+        wl: meta.wl, 
+        youtubePlaylistUrl: meta.youtubePlaylistUrl || '',
+        songs: setlist, 
+        updatedAt: new Date().toISOString() 
+      });
       setCurrentSetlistId(id); setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 3000); 
     } catch (e) { console.error("Save Setlist Error:", e); } 
     finally { setIsSavingSetlist(false); }
@@ -437,8 +447,13 @@ export default function App() {
     try { await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', id)); } finally { setDeleteSetlistConfirmId(null); }
   };
 
-  const openSetlist = (obj) => { setCurrentSetlistId(obj.id); setMeta({ date: obj.date, wl: obj.wl }); setSetlist(obj.songs || []); setView('list'); };
-  const createNewSetlist = () => { setCurrentSetlistId(null); setMeta({ date: today, wl: '' }); setSetlist([]); setView('list'); };
+  const openSetlist = (obj) => { 
+    setCurrentSetlistId(obj.id); 
+    setMeta({ date: obj.date, wl: obj.wl, youtubePlaylistUrl: obj.youtubePlaylistUrl || '' }); 
+    setSetlist(obj.songs || []); 
+    setView('list'); 
+  };
+  const createNewSetlist = () => { setCurrentSetlistId(null); setMeta({ date: today, wl: '', youtubePlaylistUrl: '' }); setSetlist([]); setView('list'); };
   const openPreviewFromHome = (obj) => { openSetlist(obj); setPreviewSource('home'); setView('preview'); };
   const openPreviewFromList = () => { setPreviewSource('list'); setView('preview'); };
 
@@ -621,11 +636,13 @@ export default function App() {
         cleanDate = dateMatch ? dateMatch[0] : today;
 
         const cleanWl = cleanString(result.wl || '');
+        const cleanYoutubeUrl = cleanString(result.youtubePlaylistUrl || '');
 
         const setlistData = {
           id: newSetlistId,
           date: cleanDate,
           wl: cleanWl,
+          youtubePlaylistUrl: cleanYoutubeUrl,
           songs: newSetlistSongs,
           updatedAt: new Date().toISOString()
         };
@@ -705,7 +722,7 @@ export default function App() {
                 value={importText}
                 onChange={(e) => { setImportText(e.target.value); setImportError(''); }}
                 className="w-full flex-1 p-4 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none transition focus:border-sky-500 font-mono text-sm resize-none custom-scrollbar"
-                placeholder="{\n  &quot;date&quot;: &quot;2026-01-11&quot;,\n  &quot;wl&quot;: &quot;Peggy/Howard&quot;,\n  &quot;songs&quot;: [\n    ...\n  ]\n}"
+                placeholder="{\n  &quot;date&quot;: &quot;2026-01-11&quot;,\n  &quot;wl&quot;: &quot;Peggy/Howard&quot;,\n  &quot;youtubePlaylistUrl&quot;: &quot;&quot;,\n  &quot;songs&quot;: [\n    ...\n  ]\n}"
                 disabled={isImporting}
               />
             </div>
@@ -829,16 +846,29 @@ export default function App() {
                         
                         <div className="flex-1 w-full mt-2 sm:mt-0">
                           <div className="flex flex-wrap gap-2">
-                            {item.songs?.map((s, i) => (
-                              <span key={i} className="inline-flex items-center text-[12px] sm:text-[13px] font-medium text-slate-700 bg-white border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-full shadow-sm group-hover:border-sky-200 transition">
-                                <span className="text-sky-500 font-bold mr-1.5 opacity-80">{i+1}.</span> <span className="truncate max-w-[150px] sm:max-w-none">{String(s.title || '未命名')}</span>
-                              </span>
-                            ))}
+                            {item.songs?.map((s, i) => {
+                              const dbSong = songsDb.find(dbS => dbS.id === s.songId);
+                              const ytLink = dbSong?.youtubeId 
+                                ? `https://youtu.be/${dbSong.youtubeId}` 
+                                : `https://www.youtube.com/results?search_query=${encodeURIComponent(s.title)}`;
+                              
+                              return (
+                                <a key={i} href={ytLink} target="_blank" rel="noopener noreferrer" title="前往youtube聆聽" className="inline-flex items-center text-[12px] sm:text-[13px] font-medium text-slate-700 bg-white border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-full shadow-sm group-hover:border-sky-200 hover:border-sky-300 hover:text-sky-600 transition cursor-pointer">
+                                  <span className="text-sky-500 font-bold mr-1.5 opacity-80">{i+1}.</span>
+                                  <span className="truncate max-w-[150px] sm:max-w-none">{String(s.title || '未命名')}</span>
+                                </a>
+                              );
+                            })}
                           </div>
                         </div>
                         
                         <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-4 sm:pt-0 mt-2 sm:mt-0 border-t sm:border-0 border-slate-50">
                           <button onClick={() => openPreviewFromHome(item)} className="flex-1 sm:flex-none px-4 sm:px-5 py-2 sm:py-2.5 bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex justify-center items-center gap-2"><Eye size={16}/> 預覽</button>
+                          {item.youtubePlaylistUrl && (
+                            <a href={item.youtubePlaylistUrl} target="_blank" rel="noopener noreferrer" className="flex-1 sm:flex-none px-4 sm:px-3 py-2 sm:py-2.5 bg-red-50 text-red-600 text-xs sm:text-sm font-bold rounded-xl shadow-sm hover:bg-red-100 transition flex justify-center items-center gap-2 border border-red-100" title="YouTube 播放清單">
+                              <Youtube size={16}/> <span className="sm:hidden lg:inline">播放清單</span>
+                            </a>
+                          )}
                           <button onClick={() => requireAdmin(() => openSetlist(item))} className="p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:text-sky-600 hover:border-sky-300 transition shadow-sm" title="編輯"><Edit2 size={16}/></button>
                           <button onClick={() => requireAdmin(() => setDeleteSetlistConfirmId(item.id))} className="p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm" title="刪除"><Trash2 size={16}/></button>
                         </div>
@@ -901,8 +931,12 @@ export default function App() {
             <div className="md:col-span-4 bg-white p-5 sm:p-6 border rounded-2xl h-fit shadow-sm">
               <h2 className="text-xs sm:text-sm font-bold tracking-widest text-slate-900 border-b pb-3 mb-5 sm:mb-6 uppercase">Information</h2>
               <div className="space-y-4">
-                <div><label className="text-[10px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">日期</label><input type="date" value={meta.date} onChange={e => setMeta({...meta, date: e.target.value})} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" /></div>
-                <div><label className="text-[10px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">主領</label><input type="text" value={meta.wl} onChange={e => setMeta({...meta, wl: e.target.value})} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder="例如：Rudy" /></div>
+                <div><label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest">日期</label><input type="date" value={meta.date} onChange={e => setMeta({...meta, date: e.target.value})} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" /></div>
+                <div><label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest">主領</label><input type="text" value={meta.wl} onChange={e => setMeta({...meta, wl: e.target.value})} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder="主領是誰呢" /></div>
+                <div>
+                  <label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest flex items-center gap-1"><Youtube size={12}/> YouTube 歌單連結 (選填)</label>
+                  <input type="text" value={meta.youtubePlaylistUrl} onChange={e => setMeta({...meta, youtubePlaylistUrl: e.target.value})} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder="貼上 YouTube 歌單網址..." />
+                </div>
               </div>
             </div>
             <div className="md:col-span-8 space-y-4">
@@ -944,6 +978,16 @@ export default function App() {
                 <div className="md:col-span-3 relative" ref={searchRef}>
                   <label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1.5 sm:mb-2 uppercase tracking-widest">由雲端資料庫搜尋或新增</label>
                   <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4 sm:h-5 sm:w-5" /><input type="text" value={searchQuery} onChange={e => { setSearchQuery(e.target.value); setShowDropdown(true); }} className="w-full pl-9 sm:pl-10 pr-3 py-2.5 sm:py-3 border-b-2 bg-transparent focus:border-sky-500 outline-none font-serif text-base sm:text-lg transition" placeholder="輸入歌名搜尋..." /></div>
+                  
+                  {/* Quick Filters */}
+                  <div className="flex gap-2 mt-3 overflow-x-auto pb-1 custom-scrollbar">
+                    {QUICK_FILTERS.map(f => (
+                      <button key={f.label} onClick={() => { setSearchQuery(f.query); setShowDropdown(true); }} className="px-3 py-1 bg-white hover:bg-sky-50 text-slate-600 hover:text-sky-700 text-[11px] sm:text-xs rounded-full transition whitespace-nowrap border border-slate-200 hover:border-sky-300 shadow-sm">
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 mt-3 sm:mt-4">
                     <button onClick={() => requireAdmin(() => setShowComingSoonModal(true))} className="py-2 sm:py-2.5 px-3 sm:px-4 bg-gradient-to-r from-sky-50 to-transparent border border-sky-100 hover:border-sky-300 rounded-xl text-xs sm:text-[13px] text-slate-700 font-bold flex items-center justify-center gap-1.5 sm:gap-2 transition shadow-sm hover:shadow">
                       <Sparkles size={14} className="text-sky-500"/> 找不到？AI 網址抓取
@@ -1064,7 +1108,7 @@ export default function App() {
             
             <div className="mb-8 sm:mb-10 flex flex-col sm:flex-row gap-6">
               <div className="flex-1">
-                <label className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1 uppercase tracking-widest"><Youtube size={14} className="text-red-500"/> YouTube 連結或 ID (必填)</label>
+                <label className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1 uppercase tracking-widest"><Youtube size={14} className="text-red-500"/> YouTube 連結或 ID</label>
                 <input type="text" value={customYoutubeUrl} onChange={e => setCustomYoutubeUrl(e.target.value)} className="w-full border-b-2 bg-transparent p-2 text-xs sm:text-sm outline-none transition focus:border-sky-500" placeholder="https://youtu.be/..." />
               </div>
               <div className="flex items-end pb-2">
@@ -1089,7 +1133,18 @@ export default function App() {
           <ConfirmModal isOpen={deleteConfirmId !== null} title="永久刪除？" message="此動作將移除雲端檔案，無法復原。" onCancel={() => setDeleteConfirmId(null)} onConfirm={() => executeDeleteDbSong(deleteConfirmId)} />
           <header className="mb-6 sm:mb-8 border-b pb-4 sm:pb-6 flex justify-between items-center"><button onClick={() => setView('home')} className="flex items-center gap-1 sm:gap-2 text-slate-500 hover:text-slate-900 transition font-medium text-sm sm:text-base"><ChevronLeft size={18}/> 返回</button><div className="font-serif tracking-widest text-slate-900 uppercase font-bold flex items-center gap-1 sm:gap-2 text-xs sm:text-base"><Database size={16} className="text-sky-500 hidden sm:block" /> 詩歌庫管理</div></header>
           <div className="bg-white border p-4 sm:p-6 rounded-2xl mb-6 sm:mb-8 flex flex-col md:flex-row gap-3 sm:gap-4 shadow-sm items-center">
-            <div className="relative flex-1 w-full"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4"/><input type="text" value={librarySearch} onChange={e => setLibrarySearch(e.target.value)} className="w-full pl-9 sm:pl-10 pr-4 py-2 sm:py-2.5 border rounded-xl bg-slate-50 focus:bg-white focus:ring-1 focus:ring-sky-500 outline-none transition text-sm sm:text-base" placeholder="搜尋雲端詩歌檔案..." /></div>
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4"/>
+              <input type="text" value={librarySearch} onChange={e => setLibrarySearch(e.target.value)} className="w-full pl-9 sm:pl-10 pr-4 py-2 sm:py-2.5 border rounded-xl bg-slate-50 focus:bg-white focus:ring-1 focus:ring-sky-500 outline-none transition text-sm sm:text-base" placeholder="搜尋雲端詩歌檔案..." />
+              {/* Quick Filters */}
+              <div className="flex gap-2 mt-3 overflow-x-auto pb-1 custom-scrollbar">
+                {QUICK_FILTERS.map(f => (
+                  <button key={f.label} onClick={() => setLibrarySearch(f.query)} className="px-3 py-1 bg-white border border-slate-200 hover:border-sky-300 hover:bg-sky-50 text-slate-600 hover:text-sky-700 text-[11px] sm:text-xs rounded-full transition whitespace-nowrap shadow-sm">
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="flex gap-2 w-full md:w-auto relative" ref={addDropdownRef}>
               <button onClick={() => requireAdmin(() => setShowAddDropdown(!showAddDropdown))} className="w-full md:w-auto justify-center bg-sky-500 hover:bg-sky-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-md transition flex items-center gap-2">
                 <Plus size={16}/> 新增詩歌
@@ -1220,7 +1275,7 @@ export default function App() {
 }
 
 // -----------------------------------------------------------------------------
-// PDF / Print Layout Content (重新設計的高質感版面)
+// PDF / Print Layout Content
 // -----------------------------------------------------------------------------
 const PrintLayoutContent = ({ meta, setlist }) => (
   <div className="bg-white text-slate-900 w-[816px] min-h-[1056px] mx-auto box-border p-[40px] flex flex-col font-sans shrink-0">
@@ -1242,7 +1297,7 @@ const PrintLayoutContent = ({ meta, setlist }) => (
       </div>
     </div>
 
-    {/* Highlighted Song Map Section (優化壓縮為 Grid 排版) */}
+    {/* Highlighted Song Map Section */}
     <div className="mb-5 bg-slate-50 rounded-lg p-3.5 border border-slate-200">
       <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
         {setlist.map((item, idx) => (
