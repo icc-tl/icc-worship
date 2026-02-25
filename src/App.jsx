@@ -865,8 +865,8 @@ export default function App() {
                         <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-4 sm:pt-0 mt-2 sm:mt-0 border-t sm:border-0 border-slate-50">
                           <button onClick={() => openPreviewFromHome(item)} className="flex-1 sm:flex-none px-4 sm:px-5 py-2 sm:py-2.5 bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex justify-center items-center gap-2"><Eye size={16}/> 預覽</button>
                           {item.youtubePlaylistUrl && (
-                            <a href={item.youtubePlaylistUrl} target="_blank" rel="noopener noreferrer" className="flex-1 sm:flex-none px-4 sm:px-3 py-2 sm:py-2.5 bg-red-50 text-red-600 text-xs sm:text-sm font-bold rounded-xl shadow-sm hover:bg-red-100 transition flex justify-center items-center gap-2 border border-red-100" title="YouTube 播放清單">
-                              <Youtube size={16}/> <span className="sm:hidden lg:inline">播放清單</span>
+                            <a href={item.youtubePlaylistUrl} target="_blank" rel="noopener noreferrer" className="p-2 sm:p-2.5 bg-white border border-slate-200 text-red-500 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm flex justify-center items-center" title="YouTube 播放清單">
+                              <Youtube size={16}/>
                             </a>
                           )}
                           <button onClick={() => requireAdmin(() => openSetlist(item))} className="p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:text-sky-600 hover:border-sky-300 transition shadow-sm" title="編輯"><Edit2 size={16}/></button>
