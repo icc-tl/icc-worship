@@ -828,7 +828,7 @@ export default function App() {
       {/* Hidden Print Area */}
       <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
         <div id="actual-print-area" className="bg-white text-black p-6 w-[750px] mx-auto box-border">
-          <PrintLayoutContent meta={meta} setlist={setlist} language={language} />
+          <PrintLayoutContent meta={meta} setlist={setlist} language={language} t={t} getTagExplanation={getTagExplanation} />
         </div>
       </div>
 
@@ -1002,7 +1002,7 @@ export default function App() {
                         </div>
                         
                         <div className="flex-1 w-full mt-2 sm:mt-0">
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex flex-wrap gap-2 max-h-[76px] overflow-hidden relative">
                             {item.songs?.map((s, i) => {
                               const dbSong = songsDb.find(dbS => dbS.id === s.songId);
                               const ytLink = dbSong?.youtubeId 
@@ -1020,22 +1020,26 @@ export default function App() {
                           </div>
                         </div>
                         
-                        <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-4 sm:pt-0 mt-2 sm:mt-0 border-t sm:border-0 border-slate-50">
-                          <button onClick={() => openPreviewFromHome(item)} className="flex-1 sm:flex-none px-4 sm:px-5 py-2 sm:py-2.5 bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex justify-center items-center gap-2"><Eye size={16}/> {t('預覽', language)}</button>
-                          {item.youtubePlaylistUrl && (
-                            <a href={item.youtubePlaylistUrl} target="_blank" rel="noopener noreferrer" className="relative group/tt p-2 sm:p-2.5 bg-white border border-slate-200 text-red-500 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm flex justify-center items-center">
-                              <Youtube size={16}/>
-                              <FastTooltip text={t('YouTube 播放清單', language)} />
-                            </a>
-                          )}
-                          <button onClick={() => requireAdmin(() => openSetlist(item))} className="relative group/tt p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:text-sky-600 hover:border-sky-300 transition shadow-sm">
-                            <Edit2 size={16}/>
-                            <FastTooltip text={t('編輯', language)} />
+                        <div className="flex flex-col gap-2 shrink-0 w-full md:w-[130px] pt-4 md:pt-0 mt-2 md:mt-0 border-t md:border-0 border-slate-50">
+                          <button onClick={() => openPreviewFromHome(item)} className="w-full px-4 py-2 sm:py-2.5 bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex justify-center items-center gap-2">
+                            <Eye size={16}/> {t('預覽', language)}
                           </button>
-                          <button onClick={() => requireAdmin(() => setDeleteSetlistConfirmId(item.id))} className="relative group/tt p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm">
-                            <Trash2 size={16}/>
-                            <FastTooltip text={t('刪除', language)} />
-                          </button>
+                          <div className="flex items-center justify-between md:justify-end gap-2 w-full">
+                            {item.youtubePlaylistUrl && (
+                              <a href={item.youtubePlaylistUrl} target="_blank" rel="noopener noreferrer" className="relative group/tt flex-1 md:flex-none p-2 sm:p-2 bg-white border border-slate-200 text-red-500 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm flex justify-center items-center">
+                                <Youtube size={16}/>
+                                <FastTooltip text={t('YouTube 播放清單', language)} position="top" />
+                              </a>
+                            )}
+                            <button onClick={() => requireAdmin(() => openSetlist(item))} className="relative group/tt flex-1 md:flex-none p-2 sm:p-2 bg-white border border-slate-200 text-slate-500 rounded-xl hover:text-sky-600 hover:border-sky-300 transition shadow-sm flex justify-center items-center">
+                              <Edit2 size={16}/>
+                              <FastTooltip text={t('編輯', language)} position="top" />
+                            </button>
+                            <button onClick={() => requireAdmin(() => setDeleteSetlistConfirmId(item.id))} className="relative group/tt flex-1 md:flex-none p-2 sm:p-2 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm flex justify-center items-center">
+                              <Trash2 size={16}/>
+                              <FastTooltip text={t('刪除', language)} position="top" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -1411,7 +1415,7 @@ export default function App() {
           <main className="flex-1 overflow-auto p-2 sm:p-8 flex items-start justify-start md:justify-center pb-24 w-full custom-scrollbar">
             <div className="w-fit shrink-0">
               <div id="pdf-print-area" className="bg-white shadow-2xl relative overflow-hidden">
-                <PrintLayoutContent meta={meta} setlist={setlist} language={language} />
+                <PrintLayoutContent meta={meta} setlist={setlist} language={language} t={t} getTagExplanation={getTagExplanation} />
               </div>
             </div>
           </main>
@@ -1454,7 +1458,7 @@ export default function App() {
 // -----------------------------------------------------------------------------
 // PDF / Print Layout Content
 // -----------------------------------------------------------------------------
-const PrintLayoutContent = ({ meta, setlist, language }) => (
+const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation }) => (
   <div className="bg-white text-slate-900 w-[816px] min-h-[1056px] mx-auto box-border p-[40px] flex flex-col font-sans shrink-0">
     
     {/* Modern Header - Smaller & Styled */}
