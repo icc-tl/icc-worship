@@ -134,6 +134,26 @@ const ConfirmModal = ({ isOpen, title, message, onConfirm, onCancel }) => {
   );
 };
 
+// --- Custom Fast Tooltip Component ---
+const FastTooltip = ({ text, position = 'top' }) => {
+  if (!text) return null;
+  let posClasses = '';
+  let arrowClasses = '';
+  if (position === 'top') {
+    posClasses = 'bottom-full mb-1.5 left-1/2 -translate-x-1/2';
+    arrowClasses = 'top-full left-1/2 -translate-x-1/2 border-t-slate-800/95';
+  } else if (position === 'left') {
+    posClasses = 'right-full mr-2 top-1/2 -translate-y-1/2';
+    arrowClasses = 'left-full top-1/2 -translate-y-1/2 border-l-slate-800/95';
+  }
+  return (
+    <div className={`absolute ${posClasses} w-max max-w-[200px] bg-slate-800/95 backdrop-blur-sm text-white text-[11px] px-2.5 py-1.5 rounded-md opacity-0 group-hover/tt:opacity-100 transition-all duration-100 pointer-events-none z-[200] shadow-xl whitespace-pre-line text-center font-sans font-normal leading-relaxed scale-95 group-hover/tt:scale-100`}>
+      {text}
+      <div className={`absolute border-[4px] border-transparent ${arrowClasses}`}></div>
+    </div>
+  );
+};
+
 // -----------------------------------------------------------------------------
 // Main Application Component
 // -----------------------------------------------------------------------------
@@ -330,9 +350,15 @@ export default function App() {
 
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      const hasSetlist = setlistsDb.some(s => s.date === dateStr);
+      const daySetlists = setlistsDb.filter(s => s.date === dateStr);
+      const hasSetlist = daySetlists.length > 0;
       const isSelected = homeSearchQuery === dateStr;
       const isToday = dateStr === today;
+      
+      let tooltipText = '';
+      if (hasSetlist) {
+        tooltipText = daySetlists.map(s => `主領: ${s.wl || '未指定'}`).join('\n');
+      }
 
       days.push(
         <div key={d} className="p-1 flex justify-center items-center">
@@ -341,7 +367,7 @@ export default function App() {
               if (homeSearchQuery === dateStr) setHomeSearchQuery(''); // 取消過濾
               else if (hasSetlist) setHomeSearchQuery(dateStr); // 過濾此日歌單
             }}
-            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs transition-all relative
+            className={`relative group/tt w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs transition-all
               ${isSelected ? 'bg-sky-500 text-white font-bold shadow-md scale-110' :
                 hasSetlist ? 'bg-sky-50 text-sky-600 font-bold hover:bg-sky-100 border border-sky-200 cursor-pointer' :
                 isToday ? 'bg-slate-100 text-slate-900 font-bold' :
@@ -351,6 +377,7 @@ export default function App() {
             {hasSetlist && !isSelected && (
               <span className="absolute bottom-0.5 w-1 h-1 bg-sky-500 rounded-full"></span>
             )}
+            {hasSetlist && <FastTooltip text={tooltipText} />}
           </button>
         </div>
       );
@@ -853,9 +880,10 @@ export default function App() {
                                 : `https://www.youtube.com/results?search_query=${encodeURIComponent(s.title)}`;
                               
                               return (
-                                <a key={i} href={ytLink} target="_blank" rel="noopener noreferrer" title="前往youtube聆聽" className="inline-flex items-center text-[12px] sm:text-[13px] font-medium text-slate-700 bg-white border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-full shadow-sm group-hover:border-sky-200 hover:border-sky-300 hover:text-sky-600 transition cursor-pointer">
+                                <a key={i} href={ytLink} target="_blank" rel="noopener noreferrer" className="relative group/tt inline-flex items-center text-[12px] sm:text-[13px] font-medium text-slate-700 bg-white border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-full shadow-sm group-hover:border-sky-200 hover:border-sky-300 hover:text-sky-600 transition cursor-pointer">
                                   <span className="text-sky-500 font-bold mr-1.5 opacity-80">{i+1}.</span>
                                   <span className="truncate max-w-[150px] sm:max-w-none">{String(s.title || '未命名')}</span>
+                                  <FastTooltip text="前往 YouTube 聆聽" />
                                 </a>
                               );
                             })}
@@ -865,12 +893,19 @@ export default function App() {
                         <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-4 sm:pt-0 mt-2 sm:mt-0 border-t sm:border-0 border-slate-50">
                           <button onClick={() => openPreviewFromHome(item)} className="flex-1 sm:flex-none px-4 sm:px-5 py-2 sm:py-2.5 bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex justify-center items-center gap-2"><Eye size={16}/> 預覽</button>
                           {item.youtubePlaylistUrl && (
-                            <a href={item.youtubePlaylistUrl} target="_blank" rel="noopener noreferrer" className="p-2 sm:p-2.5 bg-white border border-slate-200 text-red-500 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm flex justify-center items-center" title="YouTube 播放清單">
+                            <a href={item.youtubePlaylistUrl} target="_blank" rel="noopener noreferrer" className="relative group/tt p-2 sm:p-2.5 bg-white border border-slate-200 text-red-500 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm flex justify-center items-center">
                               <Youtube size={16}/>
+                              <FastTooltip text="YouTube 播放清單" />
                             </a>
                           )}
-                          <button onClick={() => requireAdmin(() => openSetlist(item))} className="p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:text-sky-600 hover:border-sky-300 transition shadow-sm" title="編輯"><Edit2 size={16}/></button>
-                          <button onClick={() => requireAdmin(() => setDeleteSetlistConfirmId(item.id))} className="p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm" title="刪除"><Trash2 size={16}/></button>
+                          <button onClick={() => requireAdmin(() => openSetlist(item))} className="relative group/tt p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:text-sky-600 hover:border-sky-300 transition shadow-sm">
+                            <Edit2 size={16}/>
+                            <FastTooltip text="編輯" />
+                          </button>
+                          <button onClick={() => requireAdmin(() => setDeleteSetlistConfirmId(item.id))} className="relative group/tt p-2 sm:p-2.5 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm">
+                            <Trash2 size={16}/>
+                            <FastTooltip text="刪除" />
+                          </button>
                         </div>
                       </div>
                     );
@@ -891,8 +926,9 @@ export default function App() {
                       {currentMonth.getFullYear()} <span className="text-slate-300 font-light mx-0.5">/</span> <span className="text-sky-600">{String(currentMonth.getMonth() + 1).padStart(2, '0')}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <button onClick={() => setCurrentMonth(new Date())} className="text-[10px] text-slate-500 font-bold bg-slate-50 border border-slate-200 hover:border-sky-300 hover:text-sky-600 px-2 py-1 rounded-md transition shadow-sm" title="回到今天">
+                      <button onClick={() => setCurrentMonth(new Date())} className="relative group/tt text-[10px] text-slate-500 font-bold bg-slate-50 border border-slate-200 hover:border-sky-300 hover:text-sky-600 px-2 py-1 rounded-md transition shadow-sm">
                         Today
+                        <FastTooltip text="回到今天" />
                       </button>
                       <div className="flex items-center bg-slate-50 rounded-lg border border-slate-100 p-0.5">
                         <button onClick={prevMonth} className="p-1 hover:bg-white rounded-md text-slate-400 hover:text-sky-600 transition shadow-sm"><ChevronLeft size={14}/></button>
@@ -958,8 +994,8 @@ export default function App() {
                         <button onClick={() => moveItem(index, 'up')} className="p-1.5 sm:p-1 text-slate-400 hover:text-sky-600 transition bg-slate-50 sm:bg-transparent rounded sm:rounded-none"><ArrowUp size={14}/></button>
                         <button onClick={() => moveItem(index, 'down')} className="p-1.5 sm:p-1 text-slate-400 hover:text-sky-600 transition bg-slate-50 sm:bg-transparent rounded sm:rounded-none"><ArrowDown size={14}/></button>
                       </div>
-                      <button onClick={() => openEditor(item)} className="p-2 sm:p-2 text-slate-500 hover:text-sky-600 transition bg-slate-50 sm:bg-transparent rounded-lg"><Edit2 size={16}/></button>
-                      <button onClick={() => deleteItem(item.id)} className="p-2 sm:p-2 text-slate-400 hover:text-red-600 transition bg-slate-50 sm:bg-transparent rounded-lg"><Trash2 size={16}/></button>
+                      <button onClick={() => openEditor(item)} className="relative group/tt p-2 sm:p-2 text-slate-500 hover:text-sky-600 transition bg-slate-50 sm:bg-transparent rounded-lg"><Edit2 size={16}/><FastTooltip text="編輯" /></button>
+                      <button onClick={() => deleteItem(item.id)} className="relative group/tt p-2 sm:p-2 text-slate-400 hover:text-red-600 transition bg-slate-50 sm:bg-transparent rounded-lg"><Trash2 size={16}/><FastTooltip text="刪除" /></button>
                     </div>
                   </div>
                 ))}
@@ -1015,12 +1051,12 @@ export default function App() {
                   </div>
                   <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 mb-3 sm:mb-4 border-b pb-2 uppercase tracking-widest">歌詞預覽</h3>
                   <div className="space-y-4 sm:space-y-6 max-h-[350px] sm:max-h-[450px] overflow-y-auto pr-2 custom-scrollbar">
-                    {currentSong.lyrics?.map((s, i) => (<div key={i} className="mb-3 sm:mb-4"><span onClick={() => handleAppendTag(s.section)} title={TAG_EXPLANATIONS[s.section]} className="inline-block px-1.5 sm:px-2 py-0.5 bg-slate-100 text-slate-700 font-mono text-[9px] sm:text-[10px] font-bold rounded shadow-sm cursor-pointer hover:bg-sky-500 hover:text-white transition mb-1.5 sm:mb-2">{String(s.section||'')}</span><p className="text-xs sm:text-[14px] text-slate-700 leading-relaxed whitespace-pre-wrap">{String(s.text||'')}</p></div>))}
+                    {currentSong.lyrics?.map((s, i) => (<div key={i} className="mb-3 sm:mb-4"><span onClick={() => handleAppendTag(s.section)} className="relative group/tt inline-block px-1.5 sm:px-2 py-0.5 bg-slate-100 text-slate-700 font-mono text-[9px] sm:text-[10px] font-bold rounded shadow-sm cursor-pointer hover:bg-sky-500 hover:text-white transition mb-1.5 sm:mb-2">{String(s.section||'')} <FastTooltip text={TAG_EXPLANATIONS[s.section]} /></span><p className="text-xs sm:text-[14px] text-slate-700 leading-relaxed whitespace-pre-wrap">{String(s.text||'')}</p></div>))}
                   </div>
                 </div>
                 <div className="bg-[#FAFAFA] p-5 sm:p-6 border rounded-2xl shadow-sm h-fit order-1 lg:order-2">
                   <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 mb-3 sm:mb-4 border-b pb-2 uppercase tracking-widest">建立段落 (Map Builder)</h3>
-                  <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-5 sm:mb-6">{SONG_MAP_TAGS.map(tag => { const isAvail = STRUCTURAL_TAGS.includes(tag) || currentSong.lyrics?.some(l => l.section === tag); return (<button key={tag} onClick={() => isAvail && handleAppendTag(tag)} disabled={!isAvail} title={TAG_EXPLANATIONS[tag]} className={`px-2.5 sm:px-3 py-1 sm:py-1.5 font-mono text-xs sm:text-sm border rounded-lg transition ${isAvail ? 'bg-white text-slate-700 hover:border-sky-500 shadow-sm cursor-pointer' : 'bg-slate-50 text-slate-300 cursor-not-allowed opacity-60'}`}>{tag}</button>); })}</div>
+                  <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-5 sm:mb-6">{SONG_MAP_TAGS.map(tag => { const isAvail = STRUCTURAL_TAGS.includes(tag) || currentSong.lyrics?.some(l => l.section === tag); return (<button key={tag} onClick={() => isAvail && handleAppendTag(tag)} disabled={!isAvail} className={`relative group/tt px-2.5 sm:px-3 py-1 sm:py-1.5 font-mono text-xs sm:text-sm border rounded-lg transition ${isAvail ? 'bg-white text-slate-700 hover:border-sky-500 shadow-sm cursor-pointer' : 'bg-slate-50 text-slate-300 cursor-not-allowed opacity-60'}`}>{tag}{isAvail && <FastTooltip text={TAG_EXPLANATIONS[tag]} />}</button>); })}</div>
                   <div className="mb-6 sm:mb-8"><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1.5 sm:mb-2 uppercase tracking-widest">編輯字串 (Map String)</label><textarea value={currentMap} onChange={e => setCurrentMap(e.target.value)} rows={3} className="w-full border rounded-xl p-3 sm:p-4 bg-white font-mono shadow-sm outline-none focus:border-sky-500 transition text-blue-600 font-bold text-sm sm:text-base" placeholder="例如：I-V1-C-V2-C-B-C-E" /></div>
                   <button onClick={saveToSetlist} disabled={!currentMap.trim()} className="w-full py-3 sm:py-4 bg-sky-500 hover:bg-sky-600 text-white font-serif rounded-xl shadow-lg transition active:scale-[0.98] disabled:opacity-50 text-sm sm:text-base">確認加入歌單</button>
                 </div>
@@ -1208,8 +1244,9 @@ export default function App() {
                     </td>
                     <td className="p-3 sm:p-4 text-center">
                       {s.hasMultitrack ? (
-                        <div className="flex justify-center" title="支援 Multitrack">
+                        <div className="relative group/tt flex justify-center">
                           <Layers size={18} className="text-indigo-500 drop-shadow-sm" />
+                          <FastTooltip text="支援 Multitrack" />
                         </div>
                       ) : (
                         <span className="text-slate-200 font-medium">-</span>
@@ -1217,8 +1254,8 @@ export default function App() {
                     </td>
                     <td className="p-3 sm:p-4 text-right whitespace-nowrap">
                       <div className="flex justify-end gap-1">
-                        <button onClick={() => requireAdmin(() => openManualEntry(s, '', 'manage'))} className="p-2 sm:p-2.5 hover:bg-white rounded-lg text-slate-400 hover:text-sky-600 transition shadow-sm border border-transparent hover:border-slate-100"><Edit2 size={16}/></button>
-                        <button onClick={() => requireAdmin(() => setDeleteConfirmId(s.id))} className="p-2 sm:p-2.5 hover:bg-white rounded-lg text-slate-300 hover:text-red-600 transition border border-transparent hover:border-red-50"><Trash2 size={16}/></button>
+                        <button onClick={() => requireAdmin(() => openManualEntry(s, '', 'manage'))} className="relative group/tt p-2 sm:p-2.5 hover:bg-white rounded-lg text-slate-400 hover:text-sky-600 transition shadow-sm border border-transparent hover:border-slate-100"><Edit2 size={16}/><FastTooltip text="編輯" position="left" /></button>
+                        <button onClick={() => requireAdmin(() => setDeleteConfirmId(s.id))} className="relative group/tt p-2 sm:p-2.5 hover:bg-white rounded-lg text-slate-300 hover:text-red-600 transition border border-transparent hover:border-red-50"><Trash2 size={16}/><FastTooltip text="刪除" position="left" /></button>
                       </div>
                     </td>
                   </tr>
