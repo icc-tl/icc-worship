@@ -21,7 +21,13 @@ const TRANSLATIONS = {
   "取消返回": "Cancel",
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
-  "請在下方貼上由 AI 產生之 JSON 格式文字。系統會自動過濾多餘的標籤，並將新詩歌建檔存入雲端！✨": "Paste the AI-generated JSON below. The system will auto-filter tags and save new songs to the cloud! ✨",
+  "透過此功能，您可以將過往的 SongMap 快速匯入系統，協助擴充雲端歌單。": "With this feature, you can quickly import past SongMaps into the system to help expand the cloud song library.",
+  "請先申請或登入": "Please register or login to your ",
+  "Google Gemini AI 免費帳號": "free Google Gemini AI account",
+  "登入後，請點擊進入": "After logging in, please click to access the ",
+  "歌單資訊轉換程式": "Setlist Converter Program",
+  "點擊左下方的「+」號上傳欲轉換的 SongMap 檔案，接著直接按下右下角的送出鍵（不需輸入任何指令）。": "Click the '+' icon at the bottom left to upload your SongMap file, then simply press send at the bottom right (no prompt needed).",
+  "複製 AI 產生的 JSON 格式文字，貼到下方輸入框中並開始匯入。系統會自動過濾多餘標籤，並將新詩歌建檔存入雲端！✨": "Copy the AI-generated JSON format text, paste it into the box below, and click import. The system will auto-filter excess tags and save new songs to the cloud! ✨",
   "取消": "Cancel",
   "處理並匯入中...": "Processing & Importing...",
   "開始匯入": "Start Import",
@@ -953,42 +959,65 @@ export default function App() {
       {/* JSON Import Modal */}
       {showImportModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="flex justify-between items-center mb-4 shrink-0">
+          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden">
+            {/* Header - Fixed at top */}
+            <div className="flex justify-between items-center p-6 sm:p-8 pb-4 border-b border-slate-100 shrink-0">
               <h3 className="text-xl font-bold flex items-center gap-2 font-serif text-slate-900">
                 <Code size={22} className="text-sky-500"/> {t('貼上 JSON 匯入歌單', language)}
               </h3>
-              <button onClick={() => !isImporting && setShowImportModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={20}/>
+              <button onClick={() => !isImporting && setShowImportModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <X size={24}/>
               </button>
             </div>
             
-            <div className="text-[13px] text-slate-600 mb-4 leading-relaxed bg-sky-50 p-4 rounded-xl border border-sky-100 shrink-0">
-              {t('請在下方貼上由 AI 產生之 JSON 格式文字。系統會自動過濾多餘的標籤，並將新詩歌建檔存入雲端！✨', language)}
-            </div>
-
-            <div className="mb-4 flex-1 overflow-hidden flex flex-col min-h-[300px]">
-              <textarea
-                value={importText}
-                onChange={(e) => { setImportText(e.target.value); setImportError(''); }}
-                className="w-full flex-1 p-4 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none transition focus:border-sky-500 font-mono text-sm resize-none custom-scrollbar"
-                placeholder="{\n  &quot;date&quot;: &quot;2026-01-11&quot;,\n  &quot;wl&quot;: &quot;Peggy/Howard&quot;,\n  &quot;youtubePlaylistUrl&quot;: &quot;&quot;,\n  &quot;songs&quot;: [\n    ...\n  ]\n}"
-                disabled={isImporting}
-              />
-            </div>
-
-            {importError && (
-              <div className="mb-4 p-4 bg-red-50 text-red-700 text-xs rounded-xl border border-red-100 font-bold flex flex-col gap-2 shadow-sm shrink-0">
-                <div className="flex items-start gap-1.5"><X size={16} className="shrink-0 mt-0.5"/> <span className="leading-relaxed">{String(importError)}</span></div>
+            {/* Body - Scrollable */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 sm:p-8 py-4 flex flex-col gap-4">
+              <div className="text-[13px] text-slate-600 leading-relaxed bg-sky-50 p-4 rounded-xl border border-sky-100 shrink-0">
+                <p className="mb-2 font-medium text-slate-700">
+                  {t('透過此功能，您可以將過往的 SongMap 快速匯入系統，協助擴充雲端歌單。', language)}
+                </p>
+                <ol className="list-decimal pl-4 space-y-1.5">
+                  <li>
+                    {t('請先申請或登入', language)} <a href="https://gemini.google.com/app" target="_blank" rel="noopener noreferrer" className="text-sky-600 font-bold hover:underline">{t('Google Gemini AI 免費帳號', language)}</a>。
+                  </li>
+                  <li>
+                    {t('登入後，請點擊進入', language)} <a href="https://gemini.google.com/gem/1YkkQT2ImJy4mmH2p2-EOB6rjzyRfnoxZ?usp=sharing" target="_blank" rel="noopener noreferrer" className="text-sky-600 font-bold hover:underline">{t('歌單資訊轉換程式', language)}</a>。
+                  </li>
+                  <li>
+                    {t('點擊左下方的「+」號上傳欲轉換的 SongMap 檔案，接著直接按下右下角的送出鍵（不需輸入任何指令）。', language)}
+                  </li>
+                  <li>
+                    {t('複製 AI 產生的 JSON 格式文字，貼到下方輸入框中並開始匯入。系統會自動過濾多餘標籤，並將新詩歌建檔存入雲端！✨', language)}
+                  </li>
+                </ol>
               </div>
-            )}
-            
-            <div className="flex gap-3 shrink-0">
-              <button disabled={isImporting} onClick={() => setShowImportModal(false)} className="flex-1 px-4 py-3 text-sm text-slate-600 rounded-xl font-bold hover:bg-slate-100 transition">{t('取消', language)}</button>
-              <button disabled={isImporting || !importText.trim()} onClick={handleImportSubmit} className="flex-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 transition disabled:opacity-50">
-                {isImporting ? <Loader2 size={18} className="animate-spin"/> : <Wand2 size={16}/>} 
-                {isImporting ? t('處理並匯入中...', language) : t('開始匯入', language)}
-              </button>
+
+              <div className="flex-1 flex flex-col min-h-[150px] shrink-0">
+                <textarea
+                  value={importText}
+                  onChange={(e) => { setImportText(e.target.value); setImportError(''); }}
+                  className="w-full flex-1 p-4 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none transition focus:border-sky-500 font-mono text-sm resize-none custom-scrollbar"
+                  placeholder="{\n  &quot;date&quot;: &quot;2026-01-11&quot;,\n  &quot;wl&quot;: &quot;Peggy/Howard&quot;,\n  &quot;youtubePlaylistUrl&quot;: &quot;&quot;,\n  &quot;songs&quot;: [\n    ...\n  ]\n}"
+                  disabled={isImporting}
+                />
+              </div>
+            </div>
+
+            {/* Footer - Fixed at bottom */}
+            <div className="p-6 sm:p-8 pt-4 border-t border-slate-100 shrink-0 bg-slate-50/50">
+              {importError && (
+                <div className="mb-4 p-3 bg-red-50 text-red-700 text-xs rounded-xl border border-red-100 font-bold flex flex-col gap-2 shadow-sm">
+                  <div className="flex items-start gap-1.5"><X size={16} className="shrink-0 mt-0.5"/> <span className="leading-relaxed">{String(importError)}</span></div>
+                </div>
+              )}
+              
+              <div className="flex gap-3">
+                <button disabled={isImporting} onClick={() => setShowImportModal(false)} className="flex-1 px-4 py-3 text-sm text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition bg-slate-100">{t('取消', language)}</button>
+                <button disabled={isImporting || !importText.trim()} onClick={handleImportSubmit} className="flex-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 transition disabled:opacity-50">
+                  {isImporting ? <Loader2 size={18} className="animate-spin"/> : <Wand2 size={16}/>} 
+                  {isImporting ? t('處理並匯入中...', language) : t('開始匯入', language)}
+                </button>
+              </div>
             </div>
           </div>
         </div>
