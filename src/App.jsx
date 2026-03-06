@@ -113,7 +113,10 @@ const TRANSLATIONS = {
   "產生中...": "Generating...",
   "尚未設定段落": "No map set",
   "用心靈和誠實敬拜": "Worship in spirit and truth",
-  "日": "Sun", "一": "Mon", "二": "Tue", "三": "Wed", "四": "Thu", "五": "Fri", "六": "Sat"
+  "日": "Sun", "一": "Mon", "二": "Tue", "三": "Wed", "四": "Thu", "五": "Fri", "六": "Sat",
+  "正常版": "Normal",
+  "一頁版": "1-Page",
+  "大字版": "Large Font"
 };
 
 const t = (text, lang) => (lang === 'en' && TRANSLATIONS[text]) ? TRANSLATIONS[text] : text;
@@ -129,7 +132,7 @@ const getTagExplanation = (tag, lang) => {
 };
 
 // -----------------------------------------------------------------------------
-// Firebase & App Configuration (正式版設定 - 避免全域變數衝突)
+// Firebase & App Configuration
 // -----------------------------------------------------------------------------
 const fallbackConfig = {
   apiKey: "AIzaSyAgxBDoY1hMDxJLqYo8g7Us2fuJLS64jv8",
@@ -302,6 +305,7 @@ export default function App() {
   const [previewSource, setPreviewSource] = useState('list'); 
   const [manualSource, setManualSource] = useState('manage'); 
   const [setlist, setSetlist] = useState([]);
+  const [pdfMode, setPdfMode] = useState('normal'); // 'normal' | 'onepage' | 'large'
   
   const today = new Date().toISOString().split('T')[0];
   const [meta, setMeta] = useState({ date: today, wl: '', youtubePlaylistUrl: '' });
@@ -627,6 +631,7 @@ export default function App() {
     setView('editor');
   };
 
+  // --- 優化 PDF 匯出機制 ---
   const handleExportPDF = async () => {
     if (setlist.length === 0) return;
     setIsGenerating(true);
@@ -641,12 +646,15 @@ export default function App() {
       
       const el = document.getElementById('pdf-print-area');
       const dateStr = meta.date ? meta.date.replace(/-/g, '') : 'Date';
+      
+      // 優化分頁配置: 明確標示避免裁切的 CSS class
       const opt = { 
-        margin: [0, 0, 0, 0], 
+        margin: 0, 
         filename: `ICC_WorshipMap_${dateStr}.pdf`, 
         image: { type: 'jpeg', quality: 1 },
-        html2canvas: { scale: 2, useCORS: true, letterRendering: true }, 
-        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' } 
+        html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0 }, 
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'], avoid: '.pdf-avoid-break' } 
       };
       await window.html2pdf().set(opt).from(el).save();
     } catch (e) { console.error("PDF Export Error:", e); } finally { setIsGenerating(false); }
@@ -827,8 +835,8 @@ export default function App() {
 
       {/* Hidden Print Area */}
       <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
-        <div id="actual-print-area" className="bg-white text-black p-6 w-[750px] mx-auto box-border">
-          <PrintLayoutContent meta={meta} setlist={setlist} language={language} t={t} getTagExplanation={getTagExplanation} />
+        <div id="actual-print-area">
+          <PrintLayoutContent meta={meta} setlist={setlist} language={language} t={t} getTagExplanation={getTagExplanation} pdfMode={pdfMode} />
         </div>
       </div>
 
@@ -1090,6 +1098,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Other Views... */}
       {view === 'list' && (
         <div className="pb-20 max-w-4xl mx-auto p-4 sm:p-8 pt-4 sm:pt-6 w-full">
           <header className="mb-6 sm:mb-10 text-center flex flex-col items-center border-b border-slate-200 pb-4 sm:pb-6"><ICCLogo className="mb-4 sm:mb-5 scale-90" /><h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 mb-2 uppercase">{currentSetlistId ? t('編輯歌單', language) : t('建立新歌單', language)}</h1></header>
@@ -1406,16 +1415,26 @@ export default function App() {
 
       {view === 'preview' && (
         <div className="min-h-screen flex flex-col bg-slate-200">
-          <header className="bg-white/90 backdrop-blur-md border-b px-4 sm:px-6 py-3 sm:py-4 flex flex-row flex-wrap sm:flex-nowrap justify-between items-center sticky top-0 z-50 shadow-sm gap-2 sm:gap-0">
-            <button onClick={() => setView(previewSource)} className="flex items-center gap-1 sm:gap-2 font-medium hover:text-slate-900 transition text-slate-500 text-xs sm:text-base"><ChevronLeft size={18}/> {t('返回', language)}</button>
-            <span className="font-serif font-bold flex items-center gap-1.5 sm:gap-2 text-slate-800 text-sm sm:text-lg"><Eye size={16} className="text-[#C4A977]"/> {t('預覽與輸出', language)}</span>
-            <button onClick={handleExportPDF} disabled={isGenerating} className="px-3 sm:px-6 py-1.5 sm:py-2 bg-sky-500 hover:bg-sky-600 text-white rounded-lg font-bold shadow-lg transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5 text-xs sm:text-base">{isGenerating ? t('產生中...', language) : t('下載 PDF', language)} <Download size={14} className="sm:w-4 sm:h-4"/></button>
+          <header className="bg-white/90 backdrop-blur-md border-b px-4 sm:px-6 py-3 sm:py-4 flex flex-row flex-wrap justify-between items-center sticky top-0 z-50 shadow-sm gap-3">
+            <div className="flex items-center gap-1 sm:gap-2">
+              <button onClick={() => setView(previewSource)} className="flex items-center gap-1 sm:gap-2 font-medium hover:text-slate-900 transition text-slate-500 text-xs sm:text-base mr-2"><ChevronLeft size={18}/> {t('返回', language)}</button>
+              <span className="font-serif font-bold flex items-center gap-1.5 sm:gap-2 text-slate-800 text-sm sm:text-lg hidden md:flex"><Eye size={16} className="text-[#C4A977]"/> {t('預覽與輸出', language)}</span>
+            </div>
+
+            <div className="flex items-center gap-2 sm:gap-4 flex-wrap w-full sm:w-auto mt-2 sm:mt-0 justify-end">
+              <div className="flex bg-slate-100 p-1 rounded-lg">
+                <button onClick={() => setPdfMode('normal')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${pdfMode === 'normal' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{t('正常版', language)}</button>
+                <button onClick={() => setPdfMode('onepage')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${pdfMode === 'onepage' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{t('一頁版', language)}</button>
+                <button onClick={() => setPdfMode('large')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${pdfMode === 'large' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{t('大字版', language)}</button>
+              </div>
+              <button onClick={handleExportPDF} disabled={isGenerating} className="px-4 py-2 sm:py-2 bg-sky-500 hover:bg-sky-600 text-white rounded-lg font-bold shadow-lg transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5 text-xs sm:text-base">{isGenerating ? t('產生中...', language) : t('下載 PDF', language)} <Download size={14} className="sm:w-4 sm:h-4"/></button>
+            </div>
           </header>
           
           <main className="flex-1 overflow-auto p-2 sm:p-8 flex items-start justify-start md:justify-center pb-24 w-full custom-scrollbar">
-            <div className="w-fit shrink-0">
-              <div id="pdf-print-area" className="bg-white shadow-2xl relative overflow-hidden">
-                <PrintLayoutContent meta={meta} setlist={setlist} language={language} t={t} getTagExplanation={getTagExplanation} />
+            <div className="w-fit shrink-0 shadow-2xl relative overflow-hidden bg-white">
+              <div id="pdf-print-area">
+                <PrintLayoutContent meta={meta} setlist={setlist} language={language} t={t} getTagExplanation={getTagExplanation} pdfMode={pdfMode} />
               </div>
             </div>
           </main>
@@ -1458,81 +1477,107 @@ export default function App() {
 // -----------------------------------------------------------------------------
 // PDF / Print Layout Content
 // -----------------------------------------------------------------------------
-const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation }) => (
-  <div className="bg-white text-slate-900 w-[816px] min-h-[1056px] mx-auto box-border p-[40px] flex flex-col font-sans shrink-0">
-    
-    {/* Modern Header - Smaller & Styled */}
-    <div className="flex justify-between items-end border-b-[3px] border-slate-900 pb-3 mb-4 mt-0">
-      <div className="flex flex-col gap-1.5">
-        <h1 className="text-[26px] font-serif font-black tracking-widest text-slate-900 uppercase leading-none m-0">ICC Worship Song Map</h1>
-        <div className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded shadow-sm w-fit">
-          <CalendarDays size={12} className="text-sky-500" />
-          <span className="text-[11px] font-bold tracking-[0.15em] font-mono leading-none pt-[1px]">
-            {meta.date?.replace(/-/g, '/') || 'YYYY / MM / DD'}
-          </span>
+const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, pdfMode }) => {
+  const isOnePage = pdfMode === 'onepage';
+  const isLarge = pdfMode === 'large';
+
+  // 根據不同模式設定尺寸與間距
+  const containerBase = "bg-white text-slate-900 w-[816px] mx-auto box-border flex flex-col font-sans shrink-0";
+  const containerSizing = isOnePage ? "h-[1056px] p-[25px] overflow-hidden" : "min-h-[1056px] p-[40px]";
+  
+  const titleTextClass = isOnePage ? "text-[22px]" : (isLarge ? "text-[30px]" : "text-[26px]");
+  const headerGap = isOnePage ? "mb-3" : "mb-5";
+  const mapGap = isOnePage ? "mb-3 p-2.5" : "mb-5 p-3.5";
+
+  // 歌詞字體大小調整
+  const lyricFontSize = isOnePage ? "text-[10px] leading-[1.3]" : (isLarge ? "text-[16px] leading-[1.6]" : "text-[12px] leading-[1.5]");
+  const sectionFontSize = isOnePage ? "text-[8px]" : (isLarge ? "text-[11px]" : "text-[9px]");
+  const songTitleFontSize = isOnePage ? "text-[14px]" : (isLarge ? "text-[18px]" : "text-[15px]");
+  const songNumberFontSize = isLarge ? "text-[28px]" : "text-[22px]";
+
+  return (
+    <div className={`${containerBase} ${containerSizing}`}>
+      
+      {/* Header */}
+      <div className={`flex justify-between items-end border-b-[3px] border-slate-900 pb-2 ${headerGap} mt-0`}>
+        <div className="flex flex-col gap-1">
+          <h1 className={`${titleTextClass} font-serif font-black tracking-widest text-slate-900 uppercase leading-none m-0`}>ICC Worship Song Map</h1>
+          <div className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded shadow-sm w-fit">
+            <CalendarDays size={12} className="text-sky-500" />
+            <span className="text-[11px] font-bold tracking-[0.15em] font-mono leading-none pt-[1px]">
+              {meta.date?.replace(/-/g, '/') || 'YYYY / MM / DD'}
+            </span>
+          </div>
+        </div>
+        <div className="text-right flex flex-col items-end gap-1">
+          <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Worship Leader</span>
+          <span className="text-[15px] font-serif font-bold text-slate-800 leading-none">{meta.wl || t('未指定', language)}</span>
         </div>
       </div>
-      <div className="text-right flex flex-col items-end gap-1">
-        <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Worship Leader</span>
-        <span className="text-[15px] font-serif font-bold text-slate-800 leading-none">{meta.wl || t('未指定', language)}</span>
-      </div>
-    </div>
 
-    {/* Highlighted Song Map Section */}
-    <div className="mb-5 bg-slate-50 rounded-lg p-3.5 border border-slate-200">
-      <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
-        {setlist.map((item, idx) => (
-          <div key={idx} className="flex gap-2 items-start">
-            <div className="w-[18px] h-[18px] shrink-0 bg-slate-900 text-white rounded-[4px] flex items-center justify-center font-bold font-serif text-[9px] mt-[1px] shadow-sm">
-              {idx + 1}
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className="font-bold text-[13px] font-serif leading-none truncate">{item.title}</span>
-                <span className="text-[8px] font-mono font-bold text-sky-600 bg-sky-100/80 px-1 py-[1px] rounded leading-none shrink-0 border border-sky-200">{item.key}</span>
+      {/* Highlighted Song Map Section */}
+      <div className={`${mapGap} bg-slate-50 rounded-lg border border-slate-200`}>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
+          {setlist.map((item, idx) => (
+            <div key={idx} className="flex gap-2 items-start">
+              <div className="w-[18px] h-[18px] shrink-0 bg-slate-900 text-white rounded-[4px] flex items-center justify-center font-bold font-serif text-[9px] mt-[1px] shadow-sm">
+                {idx + 1}
               </div>
-              <div className="flex flex-wrap gap-0.5 items-center">
-                {item.mapString ? item.mapString.split('-').map((tag, tIdx) => (
-                  <div key={tIdx} className="flex items-center">
-                    <span className="inline-flex items-center justify-center px-1.5 py-[2px] bg-white border border-slate-300 text-slate-600 text-[8px] font-bold font-mono rounded-[3px] shadow-sm">
-                      {tag}
-                    </span>
-                    {tIdx < item.mapString.split('-').length - 1 && (
-                      <span className="text-slate-300 mx-[2px] font-bold text-[7px]">→</span>
-                    )}
+              <div className="flex-1 overflow-hidden">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="font-bold text-[13px] font-serif leading-none truncate">{item.title}</span>
+                  <span className="text-[8px] font-mono font-bold text-sky-600 bg-sky-100/80 px-1 py-[1px] rounded leading-none shrink-0 border border-sky-200">{item.key}</span>
+                </div>
+                <div className="flex flex-wrap gap-0.5 items-center">
+                  {item.mapString ? item.mapString.split('-').map((tag, tIdx) => (
+                    <div key={tIdx} className="flex items-center">
+                      <span className="inline-flex items-center justify-center px-1.5 py-[2px] bg-white border border-slate-300 text-slate-600 text-[8px] font-bold font-mono rounded-[3px] shadow-sm">
+                        {tag}
+                      </span>
+                      {tIdx < item.mapString.split('-').length - 1 && (
+                        <span className="text-slate-300 mx-[2px] font-bold text-[7px]">→</span>
+                      )}
+                    </div>
+                  )) : <span className="text-[8px] text-slate-400 italic">{t('尚未設定段落', language)}</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Lyrics Layout in Rows (Guarantees Left-Right Order & Prevents Messy Page Breaks) */}
+      <div className={`flex flex-col flex-1 ${isOnePage ? 'mt-2' : 'mt-4'}`}>
+        {Array.from({ length: Math.ceil(setlist.length / 2) }).map((_, rowIdx) => {
+          const rowItems = setlist.slice(rowIdx * 2, rowIdx * 2 + 2);
+          return (
+            <div key={rowIdx} className={`flex w-full ${isOnePage ? 'mb-2' : 'mb-6'} pdf-avoid-break`} style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
+              {rowItems.map((item, colIdx) => (
+                <div key={colIdx} className="w-1/2 px-4">
+                  <div className="flex items-center gap-2 mb-2 border-b border-slate-200 pb-1">
+                    <span className={`text-slate-300 font-black font-serif leading-none ${songNumberFontSize}`}>{rowIdx * 2 + colIdx + 1}.</span>
+                    <h2 className={`${songTitleFontSize} font-bold font-serif tracking-wide text-slate-900 leading-none pt-1`}>{item.title}</h2>
                   </div>
-                )) : <span className="text-[8px] text-slate-400 italic">{t('尚未設定段落', language)}</span>}
-              </div>
+                  <div className={`space-y-${isOnePage ? '1.5' : '3'}`}>
+                    {item.lyrics?.map((s, si) => (
+                      <div key={si} className="pl-2 border-l-[3px] border-sky-300">
+                        <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getTagExplanation(s.section, language).split(' ')[0] || s.section}</div>
+                        <div className={`whitespace-pre-wrap ${lyricFontSize} text-slate-800 font-sans`}>{s.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-        ))}
+          );
+        })}
+      </div>
+
+      {/* Footer */}
+      <div className="mt-4 pt-3 border-t-2 border-slate-900 flex justify-between items-center">
+          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Irvine City Church</span>
+          <span className="text-[10px] font-bold text-slate-400 tracking-[0.2em] font-serif">{t('用心靈和誠實敬拜', language)}</span>
       </div>
     </div>
-
-    {/* Lyrics Layout in Columns */}
-    <div className="columns-2 gap-10 flex-1 pt-0">
-      {setlist.map((item, idx) => (
-        <div key={idx} className="mb-6 break-inside-avoid text-left" style={{ pageBreakInside: 'avoid' }}>
-          <div className="flex items-center gap-2 mb-2.5 border-b border-slate-100 pb-1">
-            <span className="text-slate-300 font-black text-[22px] font-serif leading-none">{idx + 1}.</span>
-            <h2 className="text-[15px] font-bold font-serif tracking-wide text-slate-900 leading-none pt-1">{item.title}</h2>
-          </div>
-          <div className="space-y-3.5">
-            {item.lyrics?.map((s, si) => (
-              <div key={si} className="pl-2.5 border-l-[3px] border-sky-300">
-                <div className="font-bold text-sky-600 text-[9px] mb-1 tracking-widest uppercase">{getTagExplanation(s.section, language).split(' ')[0] || s.section} ({s.section})</div>
-                <div className="whitespace-pre-wrap text-[12px] text-slate-800 leading-[1.5] font-sans">{s.text}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-
-    {/* Footer */}
-    <div className="mt-4 pt-3 border-t-2 border-slate-900 flex justify-between items-center">
-        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Irvine City Church</span>
-        <span className="text-[10px] font-bold text-slate-400 tracking-[0.2em] font-serif">{t('用心靈和誠實敬拜', language)}</span>
-    </div>
-  </div>
-);
+  );
+};
