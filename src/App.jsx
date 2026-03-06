@@ -117,7 +117,9 @@ const TRANSLATIONS = {
   "日": "Sun", "一": "Mon", "二": "Tue", "三": "Wed", "四": "Thu", "五": "Fri", "六": "Sat",
   "正常版": "Normal",
   "一頁版": "1-Page",
-  "大字版": "Large Font"
+  "大字版": "Large Font",
+  "首": "songs",
+  "資料庫詩歌總數：": "Total songs in database: "
 };
 
 const t = (text, lang) => (lang === 'en' && TRANSLATIONS[text]) ? TRANSLATIONS[text] : text;
@@ -130,6 +132,16 @@ const getTagExplanation = (tag, lang) => {
     return match ? match[1] : exp;
   }
   return exp.split(' (')[0];
+};
+
+const getFullTagExplanation = (tag, lang) => {
+  const exp = TAG_EXPLANATIONS[tag];
+  if (!exp) return tag;
+  if (lang === 'en') {
+    const match = exp.match(/\(([^)]+)\)/);
+    return match ? `${tag} (${match[1]})` : tag;
+  }
+  return `${tag} (${exp.split(' (')[0]})`;
 };
 
 // -----------------------------------------------------------------------------
@@ -345,6 +357,9 @@ export default function App() {
   const [customHasMultitrack, setCustomHasMultitrack] = useState(false);
   const [customLyrics, setCustomLyrics] = useState([{ section: 'V', text: '' }]);
   const [isSaving, setIsSaving] = useState(false);
+  // Track initial state to enable save button when changes occur
+  const [initialCustomState, setInitialCustomState] = useState(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const [librarySearch, setLibrarySearch] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
@@ -442,6 +457,26 @@ export default function App() {
     }));
   }, [searchQuery, songsDb]);
 
+  // Check for unsaved changes in manual entry mode
+  useEffect(() => {
+    if (view !== 'manual' || !initialCustomState) return;
+    
+    const currentState = {
+      title: customTitle,
+      artist: customArtist,
+      key: customKey,
+      youtubeUrl: customYoutubeUrl,
+      hasMultitrack: customHasMultitrack,
+      lyrics: JSON.stringify(customLyrics)
+    };
+    
+    const hasChanges = Object.keys(currentState).some(
+      k => currentState[k] !== initialCustomState[k]
+    );
+    
+    setHasUnsavedChanges(hasChanges);
+  }, [customTitle, customArtist, customKey, customYoutubeUrl, customHasMultitrack, customLyrics, initialCustomState, view]);
+
   const requireAdmin = (cb) => {
     if (isAdmin) cb(); 
     else { setPendingAuthAction(() => cb); setAuthPassword(''); setAuthError(''); setShowAuthModal(true); }
@@ -520,8 +555,20 @@ export default function App() {
   const songStats = React.useMemo(() => {
     const stats = {};
     const now = new Date();
-    const threeMonthsAgo = new Date();
-    threeMonthsAgo.setMonth(now.getMonth() - 3);
+    // 取得今天的日期基準 (時間歸零)，以利精準比對
+    const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const threeMonthsAgo = new Date(todayDate);
+    threeMonthsAgo.setMonth(todayDate.getMonth() - 3);
+
+    // 取得該日期所在週的星期日 (星期日 = 0)
+    const getSunday = (date) => {
+      const d = new Date(date);
+      d.setDate(d.getDate() - d.getDay());
+      return d;
+    };
+
+    const currentWeekSunday = getSunday(todayDate);
 
     songsDb.forEach(song => {
       let count3Months = 0;
@@ -529,10 +576,20 @@ export default function App() {
 
       setlistsDb.forEach(sl => {
         if (sl.songs && sl.songs.some(s => s.songId === song.id)) {
-          const setlistDate = new Date(sl.date);
-          if (setlistDate >= threeMonthsAgo && setlistDate <= now) {
+          // 解析日期，避免直接 new Date(字串) 造成時區偏移落差
+          const parts = (sl.date || '').split('-');
+          if (parts.length !== 3) return;
+          const setlistDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+
+          // 忽略尚未發生的未來歌單
+          if (setlistDate > todayDate) {
+            return;
+          }
+
+          if (setlistDate >= threeMonthsAgo && setlistDate <= todayDate) {
             count3Months++;
           }
+          
           if (!latestDate || setlistDate > latestDate) {
             latestDate = setlistDate;
           }
@@ -541,8 +598,10 @@ export default function App() {
 
       let weeksAgo = null;
       if (latestDate) {
-        const diffTime = Math.max(0, now - latestDate);
-        weeksAgo = Math.floor(diffTime / (1000 * 60 * 60 * 24 * 7));
+        const latestWeekSunday = getSunday(latestDate);
+        const diffTime = currentWeekSunday.getTime() - latestWeekSunday.getTime();
+        // 考量日光節約等時間差，使用 Math.round 四捨五入天數後除以 7
+        weeksAgo = Math.max(0, Math.round(diffTime / (1000 * 60 * 60 * 24 * 7)));
       }
 
       stats[song.id] = { count3Months, weeksAgo };
@@ -690,6 +749,8 @@ export default function App() {
   const openManualEntry = (songToEdit = null, initialTitle = '', source = 'manage') => {
     setManualSource(source);
     setSaveError('');
+    setHasUnsavedChanges(false);
+    
     if (songToEdit) {
       setEditingDbSongId(songToEdit.id); 
       setCustomTitle(songToEdit.title); 
@@ -697,7 +758,17 @@ export default function App() {
       setCustomKey(songToEdit.defaultKey || 'C'); 
       setCustomYoutubeUrl(songToEdit.youtubeId ? `https://youtu.be/${songToEdit.youtubeId}` : ''); 
       setCustomHasMultitrack(songToEdit.hasMultitrack || false);
-      setCustomLyrics(songToEdit.lyrics && Array.isArray(songToEdit.lyrics) && songToEdit.lyrics.length > 0 ? songToEdit.lyrics : [{ section: 'V', text: '' }]);
+      const lyrics = songToEdit.lyrics && Array.isArray(songToEdit.lyrics) && songToEdit.lyrics.length > 0 ? songToEdit.lyrics : [{ section: 'V', text: '' }];
+      setCustomLyrics(lyrics);
+      
+      setInitialCustomState({
+        title: songToEdit.title,
+        artist: songToEdit.artist || '',
+        key: songToEdit.defaultKey || 'C',
+        youtubeUrl: songToEdit.youtubeId ? `https://youtu.be/${songToEdit.youtubeId}` : '',
+        hasMultitrack: songToEdit.hasMultitrack || false,
+        lyrics: JSON.stringify(lyrics)
+      });
     } else {
       setEditingDbSongId(null); 
       setCustomTitle(initialTitle); 
@@ -706,6 +777,15 @@ export default function App() {
       setCustomYoutubeUrl(''); 
       setCustomHasMultitrack(false);
       setCustomLyrics([{ section: 'V', text: '' }]);
+      
+      setInitialCustomState({
+        title: initialTitle,
+        artist: '',
+        key: 'C',
+        youtubeUrl: '',
+        hasMultitrack: false,
+        lyrics: JSON.stringify([{ section: 'V', text: '' }])
+      });
     }
     setView('manual'); setShowDropdown(false);
   };
@@ -731,6 +811,8 @@ export default function App() {
       };
       
       await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', sid), ns);
+      
+      setHasUnsavedChanges(false);
       
       if (manualSource === 'editor') { setCurrentSong(ns); setSearchQuery(ns.title); setView('editor'); } 
       else { setView('manage'); }
@@ -843,7 +925,7 @@ export default function App() {
       {/* Hidden Print Area */}
       <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
         <div id="actual-print-area">
-          <PrintLayoutContent meta={meta} setlist={setlist} language={language} t={t} getTagExplanation={getTagExplanation} pdfMode={pdfMode} />
+          <PrintLayoutContent meta={meta} setlist={setlist} language={language} t={t} getTagExplanation={getTagExplanation} getFullTagExplanation={getFullTagExplanation} pdfMode={pdfMode} />
         </div>
       </div>
 
@@ -1342,7 +1424,7 @@ export default function App() {
               </div>
               <button onClick={() => setCustomLyrics([...customLyrics, { section: 'V', text: '' }])} className="mt-6 sm:mt-8 flex items-center gap-1.5 text-xs font-bold uppercase text-sky-600 transition hover:text-sky-500 bg-sky-50 px-4 py-2 rounded-lg w-fit">{t('+ 新增段落', language)}</button>
             </div>
-            <div className="flex justify-end pt-6 sm:pt-8 border-t"><button onClick={handleSaveCustomSong} disabled={!customTitle.trim() || isSaving} className="w-full sm:w-auto px-8 sm:px-12 py-3.5 sm:py-4 bg-sky-50 hover:bg-sky-600 text-white font-serif rounded-xl shadow-xl transition active:scale-95 disabled:opacity-30 tracking-widest font-bold text-sm sm:text-base">{isSaving ? t('儲存中...', language) : (editingDbSongId ? t('確認儲存更新', language) : t('確認儲存至雲端資料庫', language))}</button></div>
+            <div className="flex justify-end pt-6 sm:pt-8 border-t"><button onClick={handleSaveCustomSong} disabled={!customTitle.trim() || (editingDbSongId && !hasUnsavedChanges) || isSaving} className="w-full sm:w-auto px-8 sm:px-12 py-3.5 sm:py-4 bg-sky-500 hover:bg-sky-600 text-white font-serif rounded-xl shadow-xl transition active:scale-95 disabled:opacity-30 tracking-widest font-bold text-sm sm:text-base">{isSaving ? t('儲存中...', language) : (editingDbSongId ? t('確認儲存更新', language) : t('確認儲存至雲端資料庫', language))}</button></div>
           </div>
         </div>
       )}
@@ -1350,8 +1432,13 @@ export default function App() {
       {view === 'manage' && (
         <div className="pb-20 max-w-6xl mx-auto p-4 sm:p-8 pt-4 w-full">
           <ConfirmModal isOpen={deleteConfirmId !== null} title={t('永久刪除？', language)} message={t('此動作將移除雲端檔案，無法復原。', language)} cancelText={t('取消', language)} confirmText={t('確認刪除', language)} onCancel={() => setDeleteConfirmId(null)} onConfirm={() => executeDeleteDbSong(deleteConfirmId)} />
-          <header className="mb-6 sm:mb-8 border-b pb-4 sm:pb-6 flex justify-between items-center"><button onClick={() => setView('home')} className="flex items-center gap-1 sm:gap-2 text-slate-500 hover:text-slate-900 transition font-medium text-sm sm:text-base"><ChevronLeft size={18}/> {t('返回', language)}</button><div className="font-serif tracking-widest text-slate-900 uppercase font-bold flex items-center gap-1 sm:gap-2 text-xs sm:text-base"><Database size={16} className="text-sky-500 hidden sm:block" /> {t('詩歌庫管理', language)}</div></header>
-          <div className="bg-white border p-4 sm:p-6 rounded-2xl mb-6 sm:mb-8 flex flex-col md:flex-row gap-3 sm:gap-4 shadow-sm items-center">
+          <header className="mb-6 sm:mb-8 border-b pb-4 sm:pb-6 flex justify-between items-center">
+            <button onClick={() => setView('home')} className="flex items-center gap-1 sm:gap-2 text-slate-500 hover:text-slate-900 transition font-medium text-sm sm:text-base"><ChevronLeft size={18}/> {t('返回', language)}</button>
+            <div className="font-serif tracking-widest text-slate-900 uppercase font-bold flex items-center gap-1 sm:gap-2 text-xs sm:text-base">
+              <Database size={16} className="text-sky-500 hidden sm:block" /> {t('詩歌庫管理', language)}
+            </div>
+          </header>
+          <div className="bg-white border p-4 sm:p-6 rounded-2xl mb-3 sm:mb-4 flex flex-col md:flex-row gap-3 sm:gap-4 shadow-sm items-center">
             <div className="relative flex-1 w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4"/>
               <input type="text" value={librarySearch} onChange={e => setLibrarySearch(e.target.value)} className="w-full pl-9 sm:pl-10 pr-4 py-2 sm:py-2.5 border rounded-xl bg-slate-50 focus:bg-white focus:ring-1 focus:ring-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('搜尋雲端詩歌檔案...', language)} />
@@ -1376,6 +1463,11 @@ export default function App() {
               )}
             </div>
           </div>
+          
+          <div className="px-2 mb-3 sm:mb-4 flex justify-start items-center text-xs sm:text-sm font-medium text-slate-500">
+            {t('資料庫詩歌總數：', language)} <span className="font-bold text-sky-600 mx-1">{songsDb.length}</span> {t('首', language)}
+          </div>
+
           <div className="bg-white border rounded-2xl shadow-sm overflow-hidden overflow-x-auto w-full">
             <table className="w-full text-left min-w-[600px]">
               <thead>
@@ -1410,7 +1502,7 @@ export default function App() {
                             {language === 'en' ? `Sung ${s.stats.count3Months} times in 3 mos` : `三月內唱過: ${s.stats.count3Months} 次`}
                           </span>
                         ) : (
-                          <span className="bg-slate-50 text-slate-400 text-[9px] sm:text-[10px] px-2 py-1 rounded-md font-medium border border-slate-100 flex items-center gap-1 w-fit whitespace-nowrap">
+                          <span className="bg-slate-50 text-slate-400 text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-1 rounded-md font-medium border border-slate-100 flex items-center gap-1 w-fit whitespace-nowrap">
                             ❄️ {t('近期未唱', language)}
                           </span>
                         )}
@@ -1472,7 +1564,7 @@ export default function App() {
           <main className="flex-1 overflow-auto p-2 sm:p-8 flex items-start justify-start md:justify-center pb-24 w-full custom-scrollbar">
             <div className="w-fit shrink-0 shadow-2xl relative overflow-hidden bg-white">
               <div id="pdf-print-area">
-                <PrintLayoutContent meta={meta} setlist={setlist} language={language} t={t} getTagExplanation={getTagExplanation} pdfMode={pdfMode} />
+                <PrintLayoutContent meta={meta} setlist={setlist} language={language} t={t} getTagExplanation={getTagExplanation} getFullTagExplanation={getFullTagExplanation} pdfMode={pdfMode} />
               </div>
             </div>
           </main>
@@ -1515,7 +1607,7 @@ export default function App() {
 // -----------------------------------------------------------------------------
 // PDF / Print Layout Content
 // -----------------------------------------------------------------------------
-const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, pdfMode }) => {
+const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, getFullTagExplanation, pdfMode }) => {
   const isOnePage = pdfMode === 'onepage';
   const isLarge = pdfMode === 'large';
 
@@ -1523,15 +1615,22 @@ const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, pdf
   const containerBase = "bg-white text-slate-900 w-[816px] mx-auto box-border flex flex-col font-sans shrink-0";
   const containerSizing = isOnePage ? "h-[1056px] p-[25px] overflow-hidden" : "min-h-[1056px] p-[40px]";
   
-  const titleTextClass = isOnePage ? "text-[22px]" : (isLarge ? "text-[30px]" : "text-[26px]");
+  const titleTextClass = isOnePage ? "text-[22px]" : (isLarge ? "text-[32px]" : "text-[26px]");
   const headerGap = isOnePage ? "mb-3" : "mb-5";
   const mapGap = isOnePage ? "mb-3 p-2.5" : "mb-5 p-3.5";
 
+  // 大字版專用的歌單地圖字體大小
+  const mapSongTitleFontSize = isLarge ? "text-[16px]" : "text-[13px]";
+  const mapKeyFontSize = isLarge ? "text-[10px]" : "text-[8px]";
+  const mapTagFontSize = isLarge ? "text-[11px]" : "text-[8px]";
+  const mapArrowFontSize = isLarge ? "text-[10px]" : "text-[7px]";
+  const mapNumberSize = isLarge ? "w-[24px] h-[24px] text-[12px]" : "w-[18px] h-[18px] text-[9px]";
+
   // 歌詞字體大小調整
   const lyricFontSize = isOnePage ? "text-[10px] leading-[1.3]" : (isLarge ? "text-[16px] leading-[1.6]" : "text-[12px] leading-[1.5]");
-  const sectionFontSize = isOnePage ? "text-[8px]" : (isLarge ? "text-[11px]" : "text-[9px]");
-  const songTitleFontSize = isOnePage ? "text-[14px]" : (isLarge ? "text-[18px]" : "text-[15px]");
-  const songNumberFontSize = isLarge ? "text-[28px]" : "text-[22px]";
+  const sectionFontSize = isOnePage ? "text-[8px]" : (isLarge ? "text-[12px]" : "text-[9px]");
+  const songTitleFontSize = isOnePage ? "text-[14px]" : (isLarge ? "text-[20px]" : "text-[15px]");
+  const songNumberFontSize = isLarge ? "text-[32px]" : "text-[22px]";
 
   return (
     <div className={`${containerBase} ${containerSizing}`}>
@@ -1555,25 +1654,25 @@ const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, pdf
 
       {/* Highlighted Song Map Section */}
       <div className={`${mapGap} bg-slate-50 rounded-lg border border-slate-200`}>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3">
           {setlist.map((item, idx) => (
-            <div key={idx} className="flex gap-2 items-start">
-              <div className="w-[18px] h-[18px] shrink-0 bg-slate-900 text-white rounded-[4px] flex items-center justify-center font-bold font-serif text-[9px] mt-[1px] shadow-sm">
+            <div key={idx} className="flex gap-2.5 items-start">
+              <div className={`${mapNumberSize} shrink-0 bg-slate-900 text-white rounded-[4px] flex items-center justify-center font-bold font-serif mt-[1px] shadow-sm`}>
                 {idx + 1}
               </div>
               <div className="flex-1 overflow-hidden">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="font-bold text-[13px] font-serif leading-none truncate">{item.title}</span>
-                  <span className="text-[8px] font-mono font-bold text-sky-600 bg-sky-100/80 px-1 py-[1px] rounded leading-none shrink-0 border border-sky-200">{item.key}</span>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className={`font-bold ${mapSongTitleFontSize} font-serif leading-none truncate`}>{item.title}</span>
+                  <span className={`${mapKeyFontSize} font-mono font-bold text-sky-600 bg-sky-100/80 px-1 py-[2px] rounded leading-none shrink-0 border border-sky-200`}>{item.key}</span>
                 </div>
                 <div className="flex flex-wrap gap-0.5 items-center">
                   {item.mapString ? item.mapString.split('-').map((tag, tIdx) => (
                     <div key={tIdx} className="flex items-center">
-                      <span className="inline-flex items-center justify-center px-1.5 py-[2px] bg-white border border-slate-300 text-slate-600 text-[8px] font-bold font-mono rounded-[3px] shadow-sm">
+                      <span className={`inline-flex items-center justify-center px-1.5 py-[2px] bg-white border border-slate-300 text-slate-600 ${mapTagFontSize} font-bold font-mono rounded-[3px] shadow-sm`}>
                         {tag}
                       </span>
                       {tIdx < item.mapString.split('-').length - 1 && (
-                        <span className="text-slate-300 mx-[2px] font-bold text-[7px]">→</span>
+                        <span className={`text-slate-300 mx-[2px] font-bold ${mapArrowFontSize}`}>→</span>
                       )}
                     </div>
                   )) : <span className="text-[8px] text-slate-400 italic">{t('尚未設定段落', language)}</span>}
@@ -1599,7 +1698,7 @@ const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, pdf
                   <div className={`space-y-${isOnePage ? '1.5' : '3'}`}>
                     {item.lyrics?.map((s, si) => (
                       <div key={si} className="pl-2 border-l-[3px] border-sky-300">
-                        <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{s.section}</div>
+                        <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getFullTagExplanation(s.section, language)}</div>
                         <div className={`whitespace-pre-wrap ${lyricFontSize} text-slate-800 font-sans`}>{s.text}</div>
                       </div>
                     ))}
