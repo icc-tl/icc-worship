@@ -1610,33 +1610,43 @@ export default function App() {
 const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, getFullTagExplanation, pdfMode }) => {
   const isOnePage = pdfMode === 'onepage';
   const isLarge = pdfMode === 'large';
-
-  // 根據不同模式設定尺寸與間距
-  const containerBase = "bg-white text-slate-900 w-[816px] mx-auto box-border flex flex-col font-sans shrink-0";
-  const containerSizing = isOnePage ? "h-[1056px] p-[25px] overflow-hidden" : "min-h-[1056px] p-[40px]";
   
-  const titleTextClass = isOnePage ? "text-[22px]" : (isLarge ? "text-[32px]" : "text-[26px]");
-  const headerGap = isOnePage ? "mb-3" : "mb-5";
-  const mapGap = isOnePage ? "mb-3 p-2.5" : "mb-5 p-3.5";
+  // 如果是一頁版且歌曲超過 4 首，啟動「擁擠模式」進一步壓縮字體與間距
+  const isCrowded = isOnePage && setlist.length > 4;
+
+  // 移除 overflow-hidden 避免吃字，改用 min-h 確保版面，並縮小 padding
+  const containerBase = "bg-white text-slate-900 w-[816px] mx-auto box-border flex flex-col font-sans shrink-0";
+  const containerSizing = isOnePage ? "min-h-[1056px] p-[20px]" : "min-h-[1056px] p-[40px]";
+  
+  const titleTextClass = isOnePage ? "text-[20px]" : (isLarge ? "text-[32px]" : "text-[26px]");
+  const headerGap = isOnePage ? "mb-2 pb-1 border-b-[2px]" : "mb-5 pb-2 border-b-[3px]";
+  const mapGap = isOnePage ? "mb-2 p-2" : "mb-5 p-3.5";
+  const mapGridGap = isOnePage ? "gap-y-1.5" : "gap-y-3";
 
   // 大字版專用的歌單地圖字體大小
-  const mapSongTitleFontSize = isLarge ? "text-[16px]" : "text-[13px]";
+  const mapSongTitleFontSize = isLarge ? "text-[16px]" : (isOnePage ? "text-[12px]" : "text-[13px]");
   const mapKeyFontSize = isLarge ? "text-[10px]" : "text-[8px]";
-  const mapTagFontSize = isLarge ? "text-[11px]" : "text-[8px]";
+  const mapTagFontSize = isLarge ? "text-[11px]" : (isCrowded ? "text-[7px]" : "text-[8px]");
   const mapArrowFontSize = isLarge ? "text-[10px]" : "text-[7px]";
   const mapNumberSize = isLarge ? "w-[24px] h-[24px] text-[12px]" : "w-[18px] h-[18px] text-[9px]";
 
-  // 歌詞字體大小調整
-  const lyricFontSize = isOnePage ? "text-[10px] leading-[1.3]" : (isLarge ? "text-[16px] leading-[1.6]" : "text-[12px] leading-[1.5]");
-  const sectionFontSize = isOnePage ? "text-[8px]" : (isLarge ? "text-[12px]" : "text-[9px]");
-  const songTitleFontSize = isOnePage ? "text-[14px]" : (isLarge ? "text-[20px]" : "text-[15px]");
-  const songNumberFontSize = isLarge ? "text-[32px]" : "text-[22px]";
+  // 歌詞字體大小調整 (擁擠模式會再縮小一點點)
+  const lyricFontSize = isOnePage ? (isCrowded ? "text-[9px] leading-[1.2]" : "text-[10px] leading-[1.3]") : (isLarge ? "text-[16px] leading-[1.6]" : "text-[12px] leading-[1.5]");
+  const sectionFontSize = isOnePage ? (isCrowded ? "text-[7px]" : "text-[8px]") : (isLarge ? "text-[12px]" : "text-[9px]");
+  const songTitleFontSize = isOnePage ? "text-[13px]" : (isLarge ? "text-[20px]" : "text-[15px]");
+  const songNumberFontSize = isLarge ? "text-[32px]" : (isOnePage ? "text-[18px]" : "text-[22px]");
+  
+  const rowMargin = isOnePage ? (isCrowded ? "mb-1" : "mb-3") : "mb-6";
+  const titleMargin = isOnePage ? "mb-1 pb-0.5" : "mb-2 pb-1";
+  const lyricSpace = isOnePage ? (isCrowded ? "space-y-1" : "space-y-1.5") : "space-y-3";
+  const colPadding = isOnePage ? "px-2" : "px-4";
+  const rowWrapperMargin = isOnePage ? "-mx-2" : "-mx-4";
 
   return (
     <div className={`${containerBase} ${containerSizing}`}>
       
       {/* Header */}
-      <div className={`flex justify-between items-end border-b-[3px] border-slate-900 pb-2 ${headerGap} mt-0`}>
+      <div className={`flex justify-between items-end border-slate-900 ${headerGap} mt-0`}>
         <div className="flex flex-col gap-1">
           <h1 className={`${titleTextClass} font-serif font-black tracking-widest text-slate-900 uppercase leading-none m-0`}>ICC Worship Song Map</h1>
           <div className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded shadow-sm w-fit">
@@ -1654,7 +1664,7 @@ const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, get
 
       {/* Highlighted Song Map Section */}
       <div className={`${mapGap} bg-slate-50 rounded-lg border border-slate-200`}>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+        <div className={`grid grid-cols-2 gap-x-6 ${mapGridGap}`}>
           {setlist.map((item, idx) => (
             <div key={idx} className="flex gap-2.5 items-start">
               <div className={`${mapNumberSize} shrink-0 bg-slate-900 text-white rounded-[4px] flex items-center justify-center font-bold font-serif mt-[1px] shadow-sm`}>
@@ -1684,18 +1694,18 @@ const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, get
       </div>
 
       {/* Lyrics Layout in Rows (Guarantees Left-Right Order & Prevents Messy Page Breaks) */}
-      <div className={`flex flex-col flex-1 ${isOnePage ? 'mt-2' : 'mt-4'}`}>
+      <div className={`flex flex-col flex-1 ${isOnePage ? 'mt-1' : 'mt-4'}`}>
         {Array.from({ length: Math.ceil(setlist.length / 2) }).map((_, rowIdx) => {
           const rowItems = setlist.slice(rowIdx * 2, rowIdx * 2 + 2);
           return (
-            <div key={rowIdx} className={`flex w-full ${isOnePage ? 'mb-2' : 'mb-6'} pdf-avoid-break`} style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
+            <div key={rowIdx} className={`flex w-full ${rowMargin} pdf-avoid-break`} style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
               {rowItems.map((item, colIdx) => (
-                <div key={colIdx} className="w-1/2 px-4">
-                  <div className="flex items-center gap-2 mb-2 border-b border-slate-200 pb-1">
+                <div key={colIdx} className={`w-1/2 ${colPadding}`}>
+                  <div className={`flex items-center gap-2 ${titleMargin} border-b border-slate-200`}>
                     <span className={`text-slate-300 font-black font-serif leading-none ${songNumberFontSize}`}>{rowIdx * 2 + colIdx + 1}.</span>
                     <h2 className={`${songTitleFontSize} font-bold font-serif tracking-wide text-slate-900 leading-none pt-1`}>{item.title}</h2>
                   </div>
-                  <div className={`space-y-${isOnePage ? '1.5' : '3'}`}>
+                  <div className={lyricSpace}>
                     {item.lyrics?.map((s, si) => (
                       <div key={si} className="pl-2 border-l-[3px] border-sky-300">
                         <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getFullTagExplanation(s.section, language)}</div>
