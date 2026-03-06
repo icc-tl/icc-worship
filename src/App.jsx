@@ -75,6 +75,7 @@ const TRANSLATIONS = {
   "雲端資料庫查無此歌 🥺": "Song not found in cloud database 🥺",
   "請點擊上方按鈕使用 AI 或手動新增": "Click buttons above to add via AI or manually",
   "調性 (Key)": "Key",
+  "自訂或選擇...": "Custom or select...",
   "編輯詩歌檔案": "Edit Song File",
   "歌詞預覽": "Lyrics Preview",
   "建立段落 (Map Builder)": "Map Builder",
@@ -832,6 +833,12 @@ export default function App() {
   // -----------------------------------------------------------------------------
   return (
     <div className="min-h-screen bg-[#FAFAFA] text-slate-900 font-sans relative flex flex-col">
+      <datalist id="key-list">
+        {KEYS.map(k => <option key={k} value={k} />)}
+      </datalist>
+      <datalist id="section-list">
+        {SONG_MAP_TAGS.map(t => <option key={t} value={t} />)}
+      </datalist>
 
       {/* Hidden Print Area */}
       <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
@@ -1181,7 +1188,10 @@ export default function App() {
                     </ul>
                   )}
                 </div>
-                <div className="md:col-span-1"><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1.5 sm:mb-2 uppercase tracking-widest">{t('調性 (Key)', language)}</label><select value={currentKey} onChange={e => setCurrentKey(e.target.value)} className="w-full px-2 sm:px-3 py-2.5 sm:py-3 border-b-2 bg-transparent focus:border-sky-500 font-sans text-sm sm:text-base transition outline-none">{KEYS.map(k => <option key={k} value={k}>{k}</option>)}</select></div>
+                <div className="md:col-span-1">
+                  <label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1.5 sm:mb-2 uppercase tracking-widest">{t('調性 (Key)', language)}</label>
+                  <input type="text" list="key-list" value={currentKey} onChange={e => setCurrentKey(e.target.value)} className="w-full px-2 sm:px-3 py-2.5 sm:py-3 border-b-2 bg-transparent focus:border-sky-500 font-sans text-sm sm:text-base transition outline-none" placeholder={t('自訂或選擇...', language)} />
+                </div>
               </div>
             </div>
             
@@ -1199,7 +1209,16 @@ export default function App() {
                 </div>
                 <div className="bg-[#FAFAFA] p-5 sm:p-6 border rounded-2xl shadow-sm h-fit order-1 lg:order-2">
                   <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 mb-3 sm:mb-4 border-b pb-2 uppercase tracking-widest">{t('建立段落 (Map Builder)', language)}</h3>
-                  <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-5 sm:mb-6">{SONG_MAP_TAGS.map(tag => { const isAvail = STRUCTURAL_TAGS.includes(tag) || currentSong.lyrics?.some(l => l.section === tag); return (<button key={tag} onClick={() => isAvail && handleAppendTag(tag)} disabled={!isAvail} className={`relative group/tt px-2.5 sm:px-3 py-1 sm:py-1.5 font-mono text-xs sm:text-sm border rounded-lg transition ${isAvail ? 'bg-white text-slate-700 hover:border-sky-500 shadow-sm cursor-pointer' : 'bg-slate-50 text-slate-300 cursor-not-allowed opacity-60'}`}>{tag}{isAvail && <FastTooltip text={getTagExplanation(tag, language)} />}</button>); })}</div>
+                  <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-5 sm:mb-6">
+                    {Array.from(new Set([...SONG_MAP_TAGS, ...(currentSong.lyrics?.map(l => l.section) || [])])).map(tag => { 
+                      const isAvail = STRUCTURAL_TAGS.includes(tag) || currentSong.lyrics?.some(l => l.section === tag); 
+                      return (
+                        <button key={tag} onClick={() => isAvail && handleAppendTag(tag)} disabled={!isAvail} className={`relative group/tt px-2.5 sm:px-3 py-1 sm:py-1.5 font-mono text-xs sm:text-sm border rounded-lg transition ${isAvail ? 'bg-white text-slate-700 hover:border-sky-500 shadow-sm cursor-pointer' : 'bg-slate-50 text-slate-300 cursor-not-allowed opacity-60'}`}>
+                          {tag}{isAvail && <FastTooltip text={getTagExplanation(tag, language)} />}
+                        </button>
+                      ); 
+                    })}
+                  </div>
                   <div className="mb-6 sm:mb-8"><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1.5 sm:mb-2 uppercase tracking-widest">{t('編輯字串 (Map String)', language)}</label><textarea value={currentMap} onChange={e => setCurrentMap(e.target.value)} rows={3} className="w-full border rounded-xl p-3 sm:p-4 bg-white font-mono shadow-sm outline-none focus:border-sky-500 transition text-blue-600 font-bold text-sm sm:text-base" placeholder={`${t('例如：', language)}I-V1-C-V2-C-B-C-E`} /></div>
                   <button onClick={saveToSetlist} disabled={!currentMap.trim()} className="w-full py-3 sm:py-4 bg-sky-500 hover:bg-sky-600 text-white font-serif rounded-xl shadow-lg transition active:scale-[0.98] disabled:opacity-50 text-sm sm:text-base">{t('確認加入歌單', language)}</button>
                 </div>
@@ -1284,7 +1303,10 @@ export default function App() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-8 mb-6 sm:mb-8">
               <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">{t('歌名 *', language)}</label><input type="text" value={customTitle} onChange={e => setCustomTitle(e.target.value)} className="w-full border-b-2 bg-transparent focus:border-sky-500 p-2 font-serif text-base sm:text-lg outline-none transition" /></div>
               <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">{t('歌手 / 出處', language)}</label><input type="text" value={customArtist} onChange={e => setCustomArtist(e.target.value)} className="w-full border-b-2 bg-transparent focus:border-sky-500 p-2 outline-none transition text-sm sm:text-base" /></div>
-              <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">{t('預設調性', language)}</label><select value={customKey} onChange={e => setCustomKey(e.target.value)} className="w-full border-b-2 bg-transparent p-2 transition outline-none focus:border-sky-500 text-sm sm:text-base">{KEYS.map(k => <option key={k} value={k}>{k}</option>)}</select></div>
+              <div>
+                <label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1 uppercase tracking-widest">{t('預設調性', language)}</label>
+                <input type="text" list="key-list" value={customKey} onChange={e => setCustomKey(e.target.value)} className="w-full border-b-2 bg-transparent p-2 transition outline-none focus:border-sky-500 text-sm sm:text-base" placeholder={t('自訂或選擇...', language)} />
+              </div>
             </div>
             
             <div className="mb-8 sm:mb-10 flex flex-col sm:flex-row gap-6">
@@ -1303,7 +1325,23 @@ export default function App() {
               </div>
             </div>
 
-            <div className="mb-8 sm:mb-10"><div className="flex justify-between items-end border-b pb-2 mb-6 sm:mb-8"><h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest">{t('歌詞段落管理', language)}</h3></div><div className="space-y-4 sm:space-y-6">{customLyrics.map((l, i) => (<div key={i} className="flex flex-col sm:flex-row gap-3 sm:gap-5 items-start group transition hover:bg-slate-50/50 p-3 rounded-xl border border-transparent hover:border-slate-100"><div className="w-full sm:w-auto shrink-0 flex sm:block justify-between items-center"><select value={l.section} onChange={e => { const nl = [...customLyrics]; nl[i].section = e.target.value; setCustomLyrics(nl); }} className="w-20 sm:w-24 p-1.5 sm:p-2 border rounded-lg font-mono text-xs sm:text-sm shadow-sm bg-white focus:border-sky-500 outline-none">{SONG_MAP_TAGS.map(t => <option key={t} value={t}>{t}</option>)}</select><div className="text-[9px] text-slate-400 mt-1 font-mono hidden sm:block text-center">{getTagExplanation(l.section, language).split(' ')[0]}</div><button onClick={() => { const nl = [...customLyrics]; nl.splice(i, 1); setCustomLyrics(nl); }} className="sm:hidden p-1.5 text-slate-300 hover:text-red-600 transition bg-white border rounded shadow-sm"><Trash2 size={16}/></button></div><textarea value={l.text} onChange={e => { const nl = [...customLyrics]; nl[i].text = e.target.value; setCustomLyrics(nl); }} rows={3} className="w-full flex-1 p-3 sm:p-4 border rounded-xl font-sans text-sm shadow-sm outline-none focus:border-sky-500 transition" placeholder={t('在此貼上歌詞內容...', language)} /><button onClick={() => { const nl = [...customLyrics]; nl.splice(i, 1); setCustomLyrics(nl); }} className="hidden sm:block p-2 text-slate-200 hover:text-red-600 transition self-center"><Trash2 size={20}/></button></div>))}</div><button onClick={() => setCustomLyrics([...customLyrics, { section: 'V', text: '' }])} className="mt-6 sm:mt-8 flex items-center gap-1.5 text-xs font-bold uppercase text-sky-600 transition hover:text-sky-500 bg-sky-50 px-4 py-2 rounded-lg w-fit">{t('+ 新增段落', language)}</button></div>
+            <div className="mb-8 sm:mb-10">
+              <div className="flex justify-between items-end border-b pb-2 mb-6 sm:mb-8"><h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest">{t('歌詞段落管理', language)}</h3></div>
+              <div className="space-y-4 sm:space-y-6">
+                {customLyrics.map((l, i) => (
+                  <div key={i} className="flex flex-col sm:flex-row gap-3 sm:gap-5 items-start group transition hover:bg-slate-50/50 p-3 rounded-xl border border-transparent hover:border-slate-100">
+                    <div className="w-full sm:w-auto shrink-0 flex sm:block justify-between items-center">
+                      <input type="text" list="section-list" value={l.section} onChange={e => { const nl = [...customLyrics]; nl[i].section = e.target.value.toUpperCase(); setCustomLyrics(nl); }} className="w-20 sm:w-24 p-1.5 sm:p-2 border rounded-lg font-mono text-xs sm:text-sm shadow-sm bg-white focus:border-sky-500 outline-none uppercase" placeholder="Tag" />
+                      <div className="text-[9px] text-slate-400 mt-1 font-mono hidden sm:block text-center">{getTagExplanation(l.section, language).split(' ')[0]}</div>
+                      <button onClick={() => { const nl = [...customLyrics]; nl.splice(i, 1); setCustomLyrics(nl); }} className="sm:hidden p-1.5 text-slate-300 hover:text-red-600 transition bg-white border rounded shadow-sm"><Trash2 size={16}/></button>
+                    </div>
+                    <textarea value={l.text} onChange={e => { const nl = [...customLyrics]; nl[i].text = e.target.value; setCustomLyrics(nl); }} rows={3} className="w-full flex-1 p-3 sm:p-4 border rounded-xl font-sans text-sm shadow-sm outline-none focus:border-sky-500 transition" placeholder={t('在此貼上歌詞內容...', language)} />
+                    <button onClick={() => { const nl = [...customLyrics]; nl.splice(i, 1); setCustomLyrics(nl); }} className="hidden sm:block p-2 text-slate-200 hover:text-red-600 transition self-center"><Trash2 size={20}/></button>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setCustomLyrics([...customLyrics, { section: 'V', text: '' }])} className="mt-6 sm:mt-8 flex items-center gap-1.5 text-xs font-bold uppercase text-sky-600 transition hover:text-sky-500 bg-sky-50 px-4 py-2 rounded-lg w-fit">{t('+ 新增段落', language)}</button>
+            </div>
             <div className="flex justify-end pt-6 sm:pt-8 border-t"><button onClick={handleSaveCustomSong} disabled={!customTitle.trim() || isSaving} className="w-full sm:w-auto px-8 sm:px-12 py-3.5 sm:py-4 bg-sky-50 hover:bg-sky-600 text-white font-serif rounded-xl shadow-xl transition active:scale-95 disabled:opacity-30 tracking-widest font-bold text-sm sm:text-base">{isSaving ? t('儲存中...', language) : (editingDbSongId ? t('確認儲存更新', language) : t('確認儲存至雲端資料庫', language))}</button></div>
           </div>
         </div>
@@ -1561,7 +1599,7 @@ const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, pdf
                   <div className={`space-y-${isOnePage ? '1.5' : '3'}`}>
                     {item.lyrics?.map((s, si) => (
                       <div key={si} className="pl-2 border-l-[3px] border-sky-300">
-                        <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getTagExplanation(s.section, language).split(' ')[0] || s.section}</div>
+                        <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{s.section}</div>
                         <div className={`whitespace-pre-wrap ${lyricFontSize} text-slate-800 font-sans`}>{s.text}</div>
                       </div>
                     ))}
