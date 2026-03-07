@@ -738,7 +738,8 @@ export default function App() {
   
   const saveToSetlist = () => {
     if (!currentSong) return;
-    if (editingItem) setSetlist(setlist.map(i => i.id === editingItem.id ? { ...i, key: currentKey, mapString: currentMap } : i));
+    // 修復更新邏輯：確保加入或更新歌單時，把 currentSong 最新編輯過的 lyrics 快照一併存入
+    if (editingItem) setSetlist(setlist.map(i => i.id === editingItem.id ? { ...i, key: currentKey, mapString: currentMap, lyrics: currentSong.lyrics } : i));
     else setSetlist([...setlist, { id: generateId(), songId: currentSong.id, title: currentSong.title, key: currentKey, mapString: currentMap, lyrics: currentSong.lyrics }]);
     setView('list');
   };
@@ -807,7 +808,6 @@ export default function App() {
       const sid = editingDbSongId || 'custom-' + Date.now();
       const extractId = (url) => String(url || '').match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([^&?]{11})/)?.[1] || String(url || '');
       
-      // 確保使用者如果只有加上標籤(如 L1、Intro)但沒有歌詞，也能夠存進資料庫，不要被過濾掉
       const filteredLyrics = customLyrics
         .filter(l => l.section && String(l.section).trim() !== '')
         .map(l => ({ 
@@ -942,7 +942,7 @@ export default function App() {
       {/* Hidden Print Area */}
       <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
         <div id="actual-print-area">
-          <PrintLayoutContent meta={meta} setlist={setlist} language={language} t={t} getTagExplanation={getTagExplanation} getFullTagExplanation={getFullTagExplanation} pdfMode={pdfMode} />
+          <PrintLayoutContent meta={meta} setlist={setlist} songsDb={songsDb} language={language} t={t} getTagExplanation={getTagExplanation} getFullTagExplanation={getFullTagExplanation} pdfMode={pdfMode} />
         </div>
       </div>
 
@@ -1604,7 +1604,7 @@ export default function App() {
           <main className="flex-1 overflow-auto p-2 sm:p-8 flex items-start justify-start md:justify-center pb-24 w-full custom-scrollbar">
             <div className="w-fit shrink-0 shadow-2xl relative overflow-hidden bg-white">
               <div id="pdf-print-area">
-                <PrintLayoutContent meta={meta} setlist={setlist} language={language} t={t} getTagExplanation={getTagExplanation} getFullTagExplanation={getFullTagExplanation} pdfMode={pdfMode} />
+                <PrintLayoutContent meta={meta} setlist={setlist} songsDb={songsDb} language={language} t={t} getTagExplanation={getTagExplanation} getFullTagExplanation={getFullTagExplanation} pdfMode={pdfMode} />
               </div>
             </div>
           </main>
@@ -1647,7 +1647,7 @@ export default function App() {
 // -----------------------------------------------------------------------------
 // PDF / Print Layout Content
 // -----------------------------------------------------------------------------
-const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, getFullTagExplanation, pdfMode }) => {
+const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplanation, getFullTagExplanation, pdfMode }) => {
   const isOnePage = pdfMode === 'onepage';
   const isLarge = pdfMode === 'large';
   
@@ -1687,9 +1687,13 @@ const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, get
     const mapTags = item.mapString ? item.mapString.split('-').filter(Boolean) : [];
     const uniqueBaseTags = Array.from(new Set(mapTags.map(t => t.replace(/\(.*?\)/g, '').trim().toUpperCase())));
     
-    // 把資料庫裡的歌詞存成 Map
+    // 【核心修復】優先尋找資料庫中的最新歌曲，若無則使用 Setlist 中的快照
+    const dbSong = songsDb?.find(s => s.id === item.songId);
+    const activeLyrics = (dbSong && dbSong.lyrics && dbSong.lyrics.length > 0) ? dbSong.lyrics : (item.lyrics || []);
+
+    // 把歌詞存成 Map
     const lyricsMap = new Map();
-    (item.lyrics || []).forEach(l => {
+    activeLyrics.forEach(l => {
       if (l.section) lyricsMap.set(l.section.toUpperCase(), l.text || '');
     });
     
