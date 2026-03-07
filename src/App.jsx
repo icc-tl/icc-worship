@@ -1695,18 +1695,27 @@ const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, get
     
     const orderedLyrics = [];
     
-    // 1. 根據 Map String 順序加入，如果沒有歌詞但有這個 Tag，就加入空字串當作標題
-    uniqueBaseTags.forEach(tag => {
-      orderedLyrics.push({
-        section: tag,
-        text: lyricsMap.has(tag) ? lyricsMap.get(tag) : ''
-      });
-      lyricsMap.delete(tag);
-    });
-    
-    // 2. 如果資料庫中有寫歌詞，但主領沒有排入 Map String 裡的，依然把它附在最下面以免漏掉
+    // 1. 只顯示資料庫中確實有建立的段落 (包含只有標籤但文字為空的 L1 等)
     lyricsMap.forEach((text, tag) => {
-      orderedLyrics.push({ section: tag, text });
+        orderedLyrics.push({ section: tag, text });
+    });
+
+    // 2. 根據 Map String 的順序對 orderedLyrics 進行排序
+    orderedLyrics.sort((a, b) => {
+        const indexA = uniqueBaseTags.indexOf(a.section);
+        const indexB = uniqueBaseTags.indexOf(b.section);
+
+        // 如果兩個都在 Map String 中，按 Map String 順序排
+        if (indexA !== -1 && indexB !== -1) {
+            return indexA - indexB;
+        }
+        // 如果 A 在 Map String 中，B 不在，A 排前面
+        if (indexA !== -1) return -1;
+        // 如果 B 在 Map String 中，A 不在，B 排前面
+        if (indexB !== -1) return 1;
+        
+        // 如果都不在 Map String 中，保持原始順序 (由資料庫抓出的順序)
+        return 0;
     });
     
     return orderedLyrics;
