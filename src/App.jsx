@@ -195,7 +195,7 @@ const cleanAndParseJSON = (rawText) => {
 // Constants & Mock Data
 // -----------------------------------------------------------------------------
 const SONG_MAP_TAGS = ['I', 'V', 'V1', 'V2', 'V3', 'V4', 'PC', 'C', 'C1', 'C2', 'C3', 'B', 'IT', 'FW', 'L1', 'L2', 'L3', 'OT', 'E'];
-const STRUCTURAL_TAGS = ['I', 'IT', 'FW', 'L1', 'L2', 'L3', 'OT', 'E'];
+const STRUCTURAL_TAGS = ['I', 'IT', 'FW', 'OT', 'E'];
 const KEYS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B', 'D-E', 'E-F#', 'F-G', 'G-A'];
 
 const TAG_EXPLANATIONS = {
@@ -806,6 +806,15 @@ export default function App() {
     try {
       const sid = editingDbSongId || 'custom-' + Date.now();
       const extractId = (url) => String(url || '').match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([^&?]{11})/)?.[1] || String(url || '');
+      
+      // 確保使用者如果只有加上標籤(如 L1、Intro)但沒有歌詞，也能夠存進資料庫，不要被過濾掉
+      const filteredLyrics = customLyrics
+        .filter(l => l.section && String(l.section).trim() !== '')
+        .map(l => ({ 
+          section: String(l.section).trim().toUpperCase(), 
+          text: String(l.text || '').trim() 
+        }));
+
       const ns = { 
         id: sid, 
         title: customTitle, 
@@ -813,7 +822,7 @@ export default function App() {
         defaultKey: customKey, 
         youtubeId: extractId(customYoutubeUrl) || '', 
         hasMultitrack: customHasMultitrack,
-        lyrics: customLyrics.filter(l => String(l.text || '').trim()) 
+        lyrics: filteredLyrics 
       };
       
       await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', sid), ns);
@@ -850,10 +859,12 @@ export default function App() {
           
           let existingSong = songsDb.find(s => String(s.title||'').replace(/\s+/g,'').toLowerCase() === cleanTitle.replace(/\s+/g,'').toLowerCase());
           
-          const cleanLyrics = (Array.isArray(song.lyrics) ? song.lyrics : []).map(l => ({
-             section: cleanString(l.section || 'V'),
-             text: cleanString(l.text || '')
-          }));
+          const cleanLyrics = (Array.isArray(song.lyrics) ? song.lyrics : [])
+            .filter(l => l.section && String(l.section).trim() !== '')
+            .map(l => ({
+               section: cleanString(l.section || 'V').toUpperCase(),
+               text: cleanString(l.text || '')
+            }));
 
           if (!existingSong) {
             existingSong = {
@@ -1669,7 +1680,37 @@ const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, get
   const titleMargin = isOnePage ? "mb-1 pb-0.5" : "mb-2 pb-1";
   const lyricSpace = isOnePage ? (isCrowded ? "space-y-1" : "space-y-1.5") : "space-y-3";
   const colPadding = isOnePage ? "px-2" : "px-4";
-  const rowWrapperMargin = isOnePage ? "-mx-2" : "-mx-4";
+
+  // 提取排序與補齊段落邏輯
+  const getOrderedLyrics = (item) => {
+    // 取得在 mapString 中實際使用到的標籤（去掉括號，如 V1(Jovy) -> V1）
+    const mapTags = item.mapString ? item.mapString.split('-').filter(Boolean) : [];
+    const uniqueBaseTags = Array.from(new Set(mapTags.map(t => t.replace(/\(.*?\)/g, '').trim().toUpperCase())));
+    
+    // 把資料庫裡的歌詞存成 Map
+    const lyricsMap = new Map();
+    (item.lyrics || []).forEach(l => {
+      if (l.section) lyricsMap.set(l.section.toUpperCase(), l.text || '');
+    });
+    
+    const orderedLyrics = [];
+    
+    // 1. 根據 Map String 順序加入，如果沒有歌詞但有這個 Tag，就加入空字串當作標題
+    uniqueBaseTags.forEach(tag => {
+      orderedLyrics.push({
+        section: tag,
+        text: lyricsMap.has(tag) ? lyricsMap.get(tag) : ''
+      });
+      lyricsMap.delete(tag);
+    });
+    
+    // 2. 如果資料庫中有寫歌詞，但主領沒有排入 Map String 裡的，依然把它附在最下面以免漏掉
+    lyricsMap.forEach((text, tag) => {
+      orderedLyrics.push({ section: tag, text });
+    });
+    
+    return orderedLyrics;
+  };
 
   return (
     <div className={`${containerBase} ${containerSizing}`}>
@@ -1735,10 +1776,10 @@ const PrintLayoutContent = ({ meta, setlist, language, t, getTagExplanation, get
                     <h2 className={`${songTitleFontSize} font-bold font-serif tracking-wide text-slate-900 leading-none pt-1`}>{item.title}</h2>
                   </div>
                   <div className={lyricSpace}>
-                    {item.lyrics?.map((s, si) => (
+                    {getOrderedLyrics(item).map((s, si) => (
                       <div key={si} className="pl-2 border-l-[3px] border-sky-300">
                         <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getFullTagExplanation(s.section, language)}</div>
-                        <div className={`whitespace-pre-wrap ${lyricFontSize} text-slate-800 font-sans`}>{s.text}</div>
+                        {s.text && <div className={`whitespace-pre-wrap ${lyricFontSize} text-slate-800 font-sans`}>{s.text}</div>}
                       </div>
                     ))}
                   </div>
