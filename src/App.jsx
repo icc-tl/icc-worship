@@ -1699,20 +1699,14 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
     
     const orderedLyrics = [];
     
-    // 1. 加入資料庫中確實建立的段落 (包含只有標籤但沒打字的，像 L1, L2 即使沒打字也會被加進來)
+    // 1. 僅保留有文字內容的段落
     lyricsMap.forEach((text, tag) => {
-        orderedLyrics.push({ section: tag, text });
-    });
-
-    // 2. 如果 Map String 裡面有排某些段落，但資料庫裡剛好沒建，我們也要把它補出來。
-    //    但是！過濾掉純音樂結構段落 (I, IT, FW, OT, E)
-    uniqueBaseTags.forEach(tag => {
-        if (!lyricsMap.has(tag) && !STRUCTURAL_TAGS.includes(tag)) {
-            orderedLyrics.push({ section: tag, text: '' });
+        if (text.trim() !== '') {
+            orderedLyrics.push({ section: tag, text });
         }
     });
 
-    // 3. 根據 Map String 的順序對 orderedLyrics 進行排序
+    // 2. 根據 Map String 的順序對 orderedLyrics 進行排序
     orderedLyrics.sort((a, b) => {
         const indexA = uniqueBaseTags.indexOf(a.section);
         const indexB = uniqueBaseTags.indexOf(b.section);
