@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Plus, Trash2, ArrowUp, ArrowDown, Edit2, X, ChevronLeft, ChevronRight, Download, FileText, Music, Eye, Database, BookOpen, Save, CalendarDays, User, Home, ListMusic, Lock, Unlock, Youtube, Sparkles, Wand2, Loader2, Crown, Code, Layers, Globe } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
@@ -337,6 +337,9 @@ export default function App() {
   const [deleteSetlistConfirmId, setDeleteSetlistConfirmId] = useState(null);
   const [homeSearchQuery, setHomeSearchQuery] = useState(''); 
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  
+  // Track changes for Auto-Save
+  const [hasSetlistChanges, setHasSetlistChanges] = useState(false);
 
   // --- Feature State ---
   const [showComingSoonModal, setShowComingSoonModal] = useState(false); 
@@ -482,6 +485,52 @@ export default function App() {
     
     setHasUnsavedChanges(hasChanges);
   }, [customTitle, customArtist, customKey, customYoutubeUrl, customHasMultitrack, customLyrics, initialCustomState, view]);
+
+  // --- Auto-Save Logic for Setlist ---
+  const saveCurrentSetlist = useCallback(async () => {
+    if (!user) return;
+    setIsSavingSetlist(true);
+    try {
+      const id = currentSetlistId || 'setlist-' + Date.now();
+      await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', id), { 
+        id, 
+        date: meta.date, 
+        wl: meta.wl, 
+        youtubePlaylistUrl: meta.youtubePlaylistUrl || '',
+        songs: setlist, 
+        updatedAt: new Date().toISOString() 
+      });
+      setCurrentSetlistId(id);
+      setHasSetlistChanges(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000); 
+    } catch (e) { 
+      console.error("Save Setlist Error:", e); 
+    } finally { 
+      setIsSavingSetlist(false); 
+    }
+  }, [user, currentSetlistId, meta, setlist]);
+
+  // Trigger auto-save after 2 seconds of inactivity if there are changes
+  useEffect(() => {
+    if (view === 'list' && hasSetlistChanges && !isSavingSetlist) {
+      const timer = setTimeout(() => {
+        saveCurrentSetlist();
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [hasSetlistChanges, view, saveCurrentSetlist, isSavingSetlist]);
+
+  // Helper functions to update state and mark as changed
+  const handleMetaChange = (field, value) => {
+    setMeta(prev => ({ ...prev, [field]: value }));
+    setHasSetlistChanges(true);
+  };
+
+  const handleSetlistChange = (newSetlist) => {
+    setSetlist(newSetlist);
+    setHasSetlistChanges(true);
+  };
 
   const requireAdmin = (cb) => {
     if (isAdmin) cb(); 
@@ -646,25 +695,6 @@ export default function App() {
       });
   }, [songsDb, librarySearch, songStats]);
 
-
-  const saveCurrentSetlist = async () => {
-    if (!user) return;
-    setIsSavingSetlist(true);
-    try {
-      const id = currentSetlistId || 'setlist-' + Date.now();
-      await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', id), { 
-        id, 
-        date: meta.date, 
-        wl: meta.wl, 
-        youtubePlaylistUrl: meta.youtubePlaylistUrl || '',
-        songs: setlist, 
-        updatedAt: new Date().toISOString() 
-      });
-      setCurrentSetlistId(id); setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 3000); 
-    } catch (e) { console.error("Save Setlist Error:", e); } 
-    finally { setIsSavingSetlist(false); }
-  };
-
   const executeDeleteSetlist = async (id) => {
     if (!user) return;
     try { await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', id)); } finally { setDeleteSetlistConfirmId(null); }
@@ -674,9 +704,10 @@ export default function App() {
     setCurrentSetlistId(obj.id); 
     setMeta({ date: obj.date, wl: obj.wl, youtubePlaylistUrl: obj.youtubePlaylistUrl || '' }); 
     setSetlist(obj.songs || []); 
+    setHasSetlistChanges(false);
     setView('list'); 
   };
-  const createNewSetlist = () => { setCurrentSetlistId(null); setMeta({ date: today, wl: '', youtubePlaylistUrl: '' }); setSetlist([]); setView('list'); };
+  const createNewSetlist = () => { setCurrentSetlistId(null); setMeta({ date: today, wl: '', youtubePlaylistUrl: '' }); setSetlist([]); setHasSetlistChanges(false); setView('list'); };
   const openPreviewFromHome = (obj) => { openSetlist(obj); setPreviewSource('home'); setView('preview'); };
   const openPreviewFromList = () => { setPreviewSource('list'); setView('preview'); };
 
@@ -739,8 +770,8 @@ export default function App() {
   const saveToSetlist = () => {
     if (!currentSong) return;
     // 修復更新邏輯：確保加入或更新歌單時，把 currentSong 最新編輯過的 lyrics 快照一併存入
-    if (editingItem) setSetlist(setlist.map(i => i.id === editingItem.id ? { ...i, key: currentKey, mapString: currentMap, lyrics: currentSong.lyrics } : i));
-    else setSetlist([...setlist, { id: generateId(), songId: currentSong.id, title: currentSong.title, key: currentKey, mapString: currentMap, lyrics: currentSong.lyrics }]);
+    if (editingItem) handleSetlistChange(setlist.map(i => i.id === editingItem.id ? { ...i, key: currentKey, mapString: currentMap, lyrics: currentSong.lyrics } : i));
+    else handleSetlistChange([...setlist, { id: generateId(), songId: currentSong.id, title: currentSong.title, key: currentKey, mapString: currentMap, lyrics: currentSong.lyrics }]);
     setView('list');
   };
 
@@ -748,10 +779,10 @@ export default function App() {
     const nl = [...setlist];
     if (dir === 'up' && idx > 0) [nl[idx-1], nl[idx]] = [nl[idx], nl[idx-1]];
     else if (dir === 'down' && idx < setlist.length - 1) [nl[idx+1], nl[idx]] = [nl[idx], nl[idx+1]];
-    setSetlist(nl);
+    handleSetlistChange(nl);
   };
 
-  const deleteItem = (id) => { setSetlist(setlist.filter(item => item.id !== id)); };
+  const deleteItem = (id) => { handleSetlistChange(setlist.filter(item => item.id !== id)); };
 
   const openManualEntry = (songToEdit = null, initialTitle = '', source = 'manage') => {
     setManualSource(source);
@@ -808,6 +839,7 @@ export default function App() {
       const sid = editingDbSongId || 'custom-' + Date.now();
       const extractId = (url) => String(url || '').match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([^&?]{11})/)?.[1] || String(url || '');
       
+      // 確保使用者如果只有加上標籤(如 L1、Intro)但沒有歌詞，也能夠存進資料庫，不要被過濾掉
       const filteredLyrics = customLyrics
         .filter(l => l.section && String(l.section).trim() !== '')
         .map(l => ({ 
@@ -1139,7 +1171,7 @@ export default function App() {
                         </div>
                         
                         <div className="flex-1 w-full mt-2 sm:mt-0">
-                          <div className="flex flex-wrap gap-2 max-h-[76px] overflow-hidden relative">
+                          <div className="flex flex-wrap gap-2 relative">
                             {item.songs?.map((s, i) => {
                               const dbSong = songsDb.find(dbS => dbS.id === s.songId);
                               const ytLink = dbSong?.youtubeId 
@@ -1232,18 +1264,18 @@ export default function App() {
         <div className="pb-20 max-w-4xl mx-auto p-4 sm:p-8 pt-4 sm:pt-6 w-full">
           <header className="mb-6 sm:mb-10 text-center flex flex-col items-center border-b border-slate-200 pb-4 sm:pb-6"><ICCLogo className="mb-4 sm:mb-5 scale-90" /><h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 mb-2 uppercase">{currentSetlistId ? t('編輯歌單', language) : t('建立新歌單', language)}</h1></header>
           <div className="flex flex-col sm:flex-row justify-end mb-6 gap-3">
-            <button onClick={saveCurrentSetlist} disabled={isSavingSetlist} className={`w-full sm:w-auto px-6 py-2.5 rounded-xl font-serif text-sm transition shadow-sm flex items-center justify-center gap-2 ${saveSuccess ? 'bg-green-600 text-white' : 'bg-white border border-sky-500 text-sky-600 hover:bg-sky-50'}`}><Save size={18}/> {isSavingSetlist ? t('儲存中...', language) : (saveSuccess ? t('已成功儲存！', language) : t('儲存歌單', language))}</button>
+            <button onClick={saveCurrentSetlist} disabled={isSavingSetlist} className={`w-full sm:w-auto px-6 py-2.5 rounded-xl font-serif text-sm transition shadow-sm flex items-center justify-center gap-2 ${saveSuccess ? 'bg-green-600 text-white' : (hasSetlistChanges ? 'bg-sky-50 border border-sky-500 text-sky-600 hover:bg-sky-100' : 'bg-white border border-slate-200 text-slate-400 cursor-not-allowed')}`}><Save size={18}/> {isSavingSetlist ? t('儲存中...', language) : (saveSuccess ? t('已成功儲存！', language) : t('儲存歌單', language))}</button>
             <button onClick={openPreviewFromList} className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-serif text-sm bg-sky-500 hover:bg-sky-600 text-white flex items-center justify-center gap-2 shadow-lg transition"><Eye size={18}/> {t('預覽與輸出', language)}</button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6 sm:gap-8">
             <div className="md:col-span-4 bg-white p-5 sm:p-6 border rounded-2xl h-fit shadow-sm">
               <h2 className="text-xs sm:text-sm font-bold tracking-widest text-slate-900 border-b pb-3 mb-5 sm:mb-6 uppercase">Information</h2>
               <div className="space-y-4">
-                <div><label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest">{t('日期', language)}</label><input type="date" value={meta.date} onChange={e => setMeta({...meta, date: e.target.value})} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" /></div>
-                <div><label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest">{t('主領', language)}</label><input type="text" value={meta.wl} onChange={e => setMeta({...meta, wl: e.target.value})} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('主領是誰呢', language)} /></div>
+                <div><label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest">{t('日期', language)}</label><input type="date" value={meta.date} onChange={e => handleMetaChange('date', e.target.value)} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" /></div>
+                <div><label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest">{t('主領', language)}</label><input type="text" value={meta.wl} onChange={e => handleMetaChange('wl', e.target.value)} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('主領是誰呢', language)} /></div>
                 <div>
                   <label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest flex items-center gap-1"><Youtube size={12}/> {t('YouTube 歌單連結 (選填)', language)}</label>
-                  <input type="text" value={meta.youtubePlaylistUrl} onChange={e => setMeta({...meta, youtubePlaylistUrl: e.target.value})} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('貼上 YouTube 歌單網址...', language)} />
+                  <input type="text" value={meta.youtubePlaylistUrl} onChange={e => handleMetaChange('youtubePlaylistUrl', e.target.value)} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('貼上 YouTube 歌單網址...', language)} />
                 </div>
               </div>
             </div>
@@ -1654,9 +1686,8 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
   // 如果是一頁版且歌曲超過 4 首，啟動「擁擠模式」進一步壓縮字體與間距
   const isCrowded = isOnePage && setlist.length > 4;
 
-  // 移除 overflow-hidden 避免吃字，改用 min-h 確保版面，並縮小 padding
-  const containerBase = "bg-white text-slate-900 w-[816px] mx-auto box-border flex flex-col font-sans shrink-0";
-  const containerSizing = isOnePage ? "min-h-[1056px] p-[20px]" : "min-h-[1056px] p-[40px]";
+  // 嚴格鎖定每頁高度為 1056px (96 DPI 下的 Letter 高度)
+  const containerBase = "bg-white text-slate-900 w-[816px] h-[1056px] mx-auto box-border flex flex-col font-sans shrink-0 overflow-hidden relative";
   
   const titleTextClass = isOnePage ? "text-[20px]" : (isLarge ? "text-[32px]" : "text-[26px]");
   const headerGap = isOnePage ? "mb-2 pb-1 border-b-[2px]" : "mb-5 pb-2 border-b-[3px]";
@@ -1683,15 +1714,12 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
 
   // 提取排序與補齊段落邏輯
   const getOrderedLyrics = (item) => {
-    // 取得在 mapString 中實際使用到的標籤（去掉括號，如 V1(Jovy) -> V1）
     const mapTags = item.mapString ? item.mapString.split('-').filter(Boolean) : [];
     const uniqueBaseTags = Array.from(new Set(mapTags.map(t => t.replace(/\(.*?\)/g, '').trim().toUpperCase())));
     
-    // 【核心修復】優先尋找資料庫中的最新歌曲，若無則使用 Setlist 中的快照
     const dbSong = songsDb?.find(s => s.id === item.songId);
     const activeLyrics = (dbSong && dbSong.lyrics && dbSong.lyrics.length > 0) ? dbSong.lyrics : (item.lyrics || []);
 
-    // 把歌詞存成 Map
     const lyricsMap = new Map();
     activeLyrics.forEach(l => {
       if (l.section) lyricsMap.set(l.section.toUpperCase(), l.text || '');
@@ -1699,117 +1727,131 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
     
     const orderedLyrics = [];
     
-    // 1. 僅保留有文字內容的段落
     lyricsMap.forEach((text, tag) => {
         if (text.trim() !== '') {
             orderedLyrics.push({ section: tag, text });
         }
     });
 
-    // 2. 根據 Map String 的順序對 orderedLyrics 進行排序
     orderedLyrics.sort((a, b) => {
         const indexA = uniqueBaseTags.indexOf(a.section);
         const indexB = uniqueBaseTags.indexOf(b.section);
 
-        // 如果兩個都在 Map String 中，按 Map String 順序排
         if (indexA !== -1 && indexB !== -1) {
             return indexA - indexB;
         }
-        // 如果 A 在 Map String 中，B 不在，A 排前面
         if (indexA !== -1) return -1;
-        // 如果 B 在 Map String 中，A 不在，B 排前面
         if (indexB !== -1) return 1;
         
-        // 如果都不在 Map String 中，保持原始順序 (由資料庫抓出的順序)
         return 0;
     });
     
     return orderedLyrics;
   };
 
+  // 計算分頁 (Pagination Logic)
+  const songsPerPage = isOnePage ? Math.max(setlist.length, 1) : (isLarge ? 2 : 4);
+  const pages = [];
+  for (let i = 0; i < setlist.length; i += songsPerPage) {
+    pages.push(setlist.slice(i, i + songsPerPage));
+  }
+  if (pages.length === 0) pages.push([]);
+
   return (
-    <div className={`${containerBase} ${containerSizing}`}>
-      
-      {/* Header */}
-      <div className={`flex justify-between items-end border-slate-900 ${headerGap} mt-0`}>
-        <div className="flex flex-col gap-1">
-          <h1 className={`${titleTextClass} font-serif font-black tracking-widest text-slate-900 uppercase leading-none m-0`}>ICC Worship Song Map</h1>
-          <div className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded shadow-sm w-fit">
-            <CalendarDays size={12} className="text-sky-500" />
-            <span className="text-[11px] font-bold tracking-[0.15em] font-mono leading-none pt-[1px]">
-              {meta.date?.replace(/-/g, '/') || 'YYYY / MM / DD'}
-            </span>
-          </div>
-        </div>
-        <div className="text-right flex flex-col items-end gap-1">
-          <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Worship Leader</span>
-          <span className="text-[15px] font-serif font-bold text-slate-800 leading-none">{meta.wl || t('未指定', language)}</span>
-        </div>
-      </div>
-
-      {/* Highlighted Song Map Section */}
-      <div className={`${mapGap} bg-slate-50 rounded-lg border border-slate-200`}>
-        <div className={`grid grid-cols-2 gap-x-6 ${mapGridGap}`}>
-          {setlist.map((item, idx) => (
-            <div key={idx} className="flex gap-2.5 items-start">
-              <div className={`${mapNumberSize} shrink-0 bg-slate-900 text-white rounded-[4px] flex items-center justify-center font-bold font-serif mt-[1px] shadow-sm`}>
-                {idx + 1}
-              </div>
-              <div className="flex-1 overflow-hidden">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className={`font-bold ${mapSongTitleFontSize} font-serif leading-none truncate`}>{item.title}</span>
-                  <span className={`${mapKeyFontSize} font-mono font-bold text-sky-600 bg-sky-100/80 px-1 py-[2px] rounded leading-none shrink-0 border border-sky-200`}>{item.key}</span>
+    <div className="flex flex-col">
+      {pages.map((pageSongs, pageIdx) => (
+        <React.Fragment key={pageIdx}>
+          <div className={containerBase} style={{ padding: isOnePage ? '25px' : '40px' }}>
+            
+            {/* Header (每一頁都有) */}
+            <div className={`flex justify-between items-end border-slate-900 ${headerGap} mt-0 shrink-0`}>
+              <div className="flex flex-col gap-1">
+                <h1 className={`${titleTextClass} font-serif font-black tracking-widest text-slate-900 uppercase leading-none m-0`}>ICC Worship Song Map</h1>
+                <div className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded shadow-sm w-fit">
+                  <CalendarDays size={12} className="text-sky-500" />
+                  <span className="text-[11px] font-bold tracking-[0.15em] font-mono leading-none pt-[1px]">
+                    {meta.date?.replace(/-/g, '/') || 'YYYY / MM / DD'}
+                  </span>
                 </div>
-                <div className="flex flex-wrap gap-0.5 items-center">
-                  {item.mapString ? item.mapString.split('-').map((tag, tIdx) => (
-                    <div key={tIdx} className="flex items-center">
-                      <span className={`inline-flex items-center justify-center px-1.5 py-[2px] bg-white border border-slate-300 text-slate-600 ${mapTagFontSize} font-bold font-mono rounded-[3px] shadow-sm`}>
-                        {tag}
-                      </span>
-                      {tIdx < item.mapString.split('-').length - 1 && (
-                        <span className={`text-slate-300 mx-[2px] font-bold ${mapArrowFontSize}`}>→</span>
-                      )}
+              </div>
+              <div className="text-right flex flex-col items-end gap-1">
+                <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Worship Leader</span>
+                <span className="text-[15px] font-serif font-bold text-slate-800 leading-none">{meta.wl || t('未指定', language)}</span>
+              </div>
+            </div>
+
+            {/* Highlighted Song Map Section (每一頁都有) */}
+            <div className={`${mapGap} bg-slate-50 rounded-lg border border-slate-200 shrink-0`}>
+              <div className={`grid grid-cols-2 gap-x-6 ${mapGridGap}`}>
+                {setlist.map((item, idx) => (
+                  <div key={idx} className="flex gap-2.5 items-start">
+                    <div className={`${mapNumberSize} shrink-0 bg-slate-900 text-white rounded-[4px] flex items-center justify-center font-bold font-serif mt-[1px] shadow-sm`}>
+                      {idx + 1}
                     </div>
-                  )) : <span className="text-[8px] text-slate-400 italic">{t('尚未設定段落', language)}</span>}
-                </div>
+                    <div className="flex-1 overflow-hidden">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className={`font-bold ${mapSongTitleFontSize} font-serif leading-none truncate`}>{item.title}</span>
+                        <span className={`${mapKeyFontSize} font-mono font-bold text-sky-600 bg-sky-100/80 px-1 py-[2px] rounded leading-none shrink-0 border border-sky-200`}>{item.key}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-0.5 items-center">
+                        {item.mapString ? item.mapString.split('-').map((tag, tIdx) => (
+                          <div key={tIdx} className="flex items-center">
+                            <span className={`inline-flex items-center justify-center px-1.5 py-[2px] bg-white border border-slate-300 text-slate-600 ${mapTagFontSize} font-bold font-mono rounded-[3px] shadow-sm`}>
+                              {tag}
+                            </span>
+                            {tIdx < item.mapString.split('-').length - 1 && (
+                              <span className={`text-slate-300 mx-[2px] font-bold ${mapArrowFontSize}`}>→</span>
+                            )}
+                          </div>
+                        )) : <span className="text-[8px] text-slate-400 italic">{t('尚未設定段落', language)}</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          ))}
-        </div>
-      </div>
 
-      {/* Lyrics Layout in Rows (Guarantees Left-Right Order & Prevents Messy Page Breaks) */}
-      <div className={`flex flex-col flex-1 ${isOnePage ? 'mt-1' : 'mt-4'}`}>
-        {Array.from({ length: Math.ceil(setlist.length / 2) }).map((_, rowIdx) => {
-          const rowItems = setlist.slice(rowIdx * 2, rowIdx * 2 + 2);
-          return (
-            <div key={rowIdx} className={`flex w-full ${rowMargin} pdf-avoid-break`} style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
-              {rowItems.map((item, colIdx) => (
-                <div key={colIdx} className={`w-1/2 ${colPadding}`}>
-                  <div className={`flex items-center gap-2 ${titleMargin} border-b border-slate-200`}>
-                    <span className={`text-slate-300 font-black font-serif leading-none ${songNumberFontSize}`}>{rowIdx * 2 + colIdx + 1}.</span>
-                    <h2 className={`${songTitleFontSize} font-bold font-serif tracking-wide text-slate-900 leading-none pt-1`}>{item.title}</h2>
+            {/* Lyrics Layout in Rows */}
+            <div className={`flex flex-col flex-1 ${isOnePage ? 'mt-1' : 'mt-4'}`}>
+              {Array.from({ length: Math.ceil(pageSongs.length / 2) }).map((_, rowIdx) => {
+                const rowItems = pageSongs.slice(rowIdx * 2, rowIdx * 2 + 2);
+                return (
+                  <div key={rowIdx} className={`flex w-full ${rowMargin}`}>
+                    {rowItems.map((item, colIdx) => {
+                      const globalIdx = setlist.indexOf(item);
+                      return (
+                        <div key={colIdx} className={`w-1/2 ${colPadding}`}>
+                          <div className={`flex items-center gap-2 ${titleMargin} border-b border-slate-200`}>
+                            <span className={`text-slate-300 font-black font-serif leading-none ${songNumberFontSize}`}>{globalIdx + 1}.</span>
+                            <h2 className={`${songTitleFontSize} font-bold font-serif tracking-wide text-slate-900 leading-none pt-1`}>{item.title}</h2>
+                          </div>
+                          <div className={lyricSpace}>
+                            {getOrderedLyrics(item).map((s, si) => (
+                              <div key={si} className="pl-2 border-l-[3px] border-sky-300">
+                                <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getFullTagExplanation(s.section, language)}</div>
+                                {s.text && <div className={`whitespace-pre-wrap ${lyricFontSize} text-slate-800 font-sans`}>{s.text}</div>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className={lyricSpace}>
-                    {getOrderedLyrics(item).map((s, si) => (
-                      <div key={si} className="pl-2 border-l-[3px] border-sky-300">
-                        <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getFullTagExplanation(s.section, language)}</div>
-                        {s.text && <div className={`whitespace-pre-wrap ${lyricFontSize} text-slate-800 font-sans`}>{s.text}</div>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
 
-      {/* Footer */}
-      <div className="mt-4 pt-3 border-t-2 border-slate-900 flex justify-between items-center">
-          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Irvine City Church</span>
-          <span className="text-[10px] font-bold text-slate-400 tracking-[0.2em] font-serif">{t('用心靈和誠實敬拜', language)}</span>
-      </div>
+            {/* Footer (Pinned to bottom of the exact page) */}
+            <div className="mt-auto pt-3 border-t-2 border-slate-900 flex justify-between items-center shrink-0">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Irvine City Church</span>
+                <span className="text-[10px] font-bold text-slate-400 tracking-[0.2em] font-serif">{t('用心靈和誠實敬拜', language)}</span>
+            </div>
+          </div>
+          
+          {/* Insert explicit page break for html2pdf except after the last page */}
+          {pageIdx < pages.length - 1 && <div className="html2pdf__page-break w-full h-[1px]"></div>}
+        </React.Fragment>
+      ))}
     </div>
   );
 };
