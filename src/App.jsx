@@ -744,10 +744,11 @@ export default function App() {
       const el = document.getElementById('pdf-print-area');
       const dateStr = meta.date ? meta.date.replace(/-/g, '') : 'Date';
       
-      // 優化分頁配置: 將 margin 設回 0 以防止 html2canvas 縮放導致右側吃字
-      // 真正的安全邊距由 HTML Container 內部的 padding 負責把關
+      // 優化分頁配置: [Top, Right, Bottom, Left]
+      // 左右 margin 設為 0 以避免 HTML (w-816px) 在轉換時被水平壓縮導致吃字。
+      // 上下 margin 設為 0.4 英吋確保印表機有足夠的安全邊距。
       const opt = { 
-        margin: 0, 
+        margin: [0.4, 0, 0.4, 0], 
         filename: `ICC_WorshipMap_${dateStr}.pdf`, 
         image: { type: 'jpeg', quality: 1 },
         html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0 }, 
@@ -1683,34 +1684,53 @@ export default function App() {
 const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplanation, getFullTagExplanation, pdfMode }) => {
   const isOnePage = pdfMode === 'onepage';
   const isLarge = pdfMode === 'large';
+  const count = setlist.length;
   
-  // 如果是一頁版且歌曲超過 4 首，啟動「擁擠模式」進一步壓縮字體與間距
-  const isCrowded = isOnePage && setlist.length > 4;
+  // 針對一頁版進行更激進的動態字體壓縮
+  let scaleTier = 1;
+  if (isOnePage) {
+    if (count <= 4) scaleTier = 1;
+    else if (count === 5) scaleTier = 2;
+    else if (count === 6) scaleTier = 3;
+    else scaleTier = 4;
+  }
 
   // 移除了強制高度限制，改用 min-h，並讓 HTML padding 來擔任實體安全邊界
   const containerBase = "bg-white text-slate-900 w-[816px] mx-auto box-border flex flex-col font-sans shrink-0 relative";
   
   const titleTextClass = isOnePage ? "text-[20px]" : (isLarge ? "text-[32px]" : "text-[26px]");
   const headerGap = isOnePage ? "mb-2 pb-1 border-b-[2px]" : "mb-5 pb-2 border-b-[3px]";
-  const mapGap = isOnePage ? "mb-2 p-2" : "mb-5 p-3.5";
-  const mapGridGap = isOnePage ? "gap-y-1.5" : "gap-y-3";
+  const mapGap = isOnePage ? (scaleTier > 1 ? "mb-1.5 p-1.5" : "mb-2 p-2") : "mb-5 p-3.5";
+  const mapGridGap = isOnePage ? "gap-y-1" : "gap-y-3";
 
-  // 大字版專用的歌單地圖字體大小
-  const mapSongTitleFontSize = isLarge ? "text-[16px]" : (isOnePage ? "text-[12px]" : "text-[13px]");
+  // 歌單地圖字體大小
+  const mapSongTitleFontSize = isLarge ? "text-[16px]" : (scaleTier > 1 ? "text-[11px]" : "text-[13px]");
   const mapKeyFontSize = isLarge ? "text-[10px]" : "text-[8px]";
-  const mapTagFontSize = isLarge ? "text-[11px]" : (isCrowded ? "text-[7px]" : "text-[8px]");
+  const mapTagFontSize = isLarge ? "text-[11px]" : (scaleTier > 1 ? "text-[7px]" : "text-[8px]");
   const mapArrowFontSize = isLarge ? "text-[10px]" : "text-[7px]";
   const mapNumberSize = isLarge ? "w-[24px] h-[24px] text-[12px]" : "w-[18px] h-[18px] text-[9px]";
 
-  // 歌詞字體大小調整 (擁擠模式會再縮小一點點)
-  const lyricFontSize = isOnePage ? (isCrowded ? "text-[9px] leading-[1.2]" : "text-[10px] leading-[1.3]") : (isLarge ? "text-[16px] leading-[1.6]" : "text-[12px] leading-[1.5]");
-  const sectionFontSize = isOnePage ? (isCrowded ? "text-[7px]" : "text-[8px]") : (isLarge ? "text-[12px]" : "text-[9px]");
-  const songTitleFontSize = isOnePage ? "text-[13px]" : (isLarge ? "text-[20px]" : "text-[15px]");
-  const songNumberFontSize = isLarge ? "text-[32px]" : (isOnePage ? "text-[18px]" : "text-[22px]");
+  // 歌詞字體大小調整 (根據 scaleTier 縮放)
+  let lyricFontSize = "text-[12px] leading-[1.5]";
+  let sectionFontSize = "text-[9px]";
+  let songTitleFontSize = "text-[15px]";
+  let songNumberFontSize = "text-[22px]";
+
+  if (isLarge) {
+    lyricFontSize = "text-[16px] leading-[1.6]";
+    sectionFontSize = "text-[12px]";
+    songTitleFontSize = "text-[20px]";
+    songNumberFontSize = "text-[32px]";
+  } else if (isOnePage) {
+    if (scaleTier === 1) { lyricFontSize = "text-[10px] leading-[1.3]"; sectionFontSize = "text-[8px]"; songTitleFontSize = "text-[14px]"; songNumberFontSize = "text-[18px]"; }
+    else if (scaleTier === 2) { lyricFontSize = "text-[9.5px] leading-[1.25]"; sectionFontSize = "text-[7.5px]"; songTitleFontSize = "text-[13px]"; songNumberFontSize = "text-[16px]"; }
+    else if (scaleTier === 3) { lyricFontSize = "text-[9px] leading-[1.15]"; sectionFontSize = "text-[7px]"; songTitleFontSize = "text-[12px]"; songNumberFontSize = "text-[14px]"; }
+    else { lyricFontSize = "text-[8.5px] leading-[1.1]"; sectionFontSize = "text-[7px]"; songTitleFontSize = "text-[11px]"; songNumberFontSize = "text-[13px]"; }
+  }
   
-  const rowMargin = isOnePage ? (isCrowded ? "mb-1" : "mb-3") : "mb-6";
-  const titleMargin = isOnePage ? "mb-1 pb-0.5" : "mb-2 pb-1";
-  const lyricSpace = isOnePage ? (isCrowded ? "space-y-1" : "space-y-1.5") : "space-y-3";
+  const rowMargin = isOnePage ? (scaleTier > 1 ? "mb-1" : "mb-3") : "mb-6";
+  const titleMargin = isOnePage ? "mb-0.5 pb-0.5" : "mb-2 pb-1";
+  const lyricSpace = isOnePage ? (scaleTier > 1 ? "space-y-0.5" : "space-y-1.5") : "space-y-3";
   const colPadding = isOnePage ? "px-2" : "px-4";
 
   // 提取排序與補齊段落邏輯
@@ -1761,8 +1781,8 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
     });
     
     if (pdfMode === 'large') return lines > 18;
-    if (pdfMode === 'onepage') return lines > 45;
-    return lines > 28; // Normal Mode: > 28 lines breaks to a full 2-col page
+    if (pdfMode === 'onepage') return false; // 為了強制擠在一頁，一頁版絕對不啟動獨立換頁
+    return lines > 26; // Normal Mode: > 26 lines breaks to a full 2-col page
   };
 
   // --- 計算分頁與切割邏輯 (Pagination Logic) ---
@@ -1771,39 +1791,47 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
   
   const maxNormal = isLarge ? 2 : 4;
 
-  setlist.forEach((song) => {
-    const isLong = checkIsLongSong(song);
-    
-    if (isLong) {
-      if (currentPage.length > 0) {
-        pages.push(currentPage);
-        currentPage = [];
+  if (isOnePage) {
+    // 一頁版：不管幾首，全部塞進第一頁的陣列中
+    pages.push(setlist);
+  } else {
+    // 正常版/大字版：依照行數與首數限制進行分頁
+    setlist.forEach((song) => {
+      const isLong = checkIsLongSong(song);
+      
+      if (isLong) {
+        if (currentPage.length > 0) {
+          pages.push(currentPage);
+          currentPage = [];
+        }
+        pages.push([song]); // Long song gets its own page
+      } else {
+        if (currentPage.length >= maxNormal) {
+          pages.push(currentPage);
+          currentPage = [];
+        }
+        currentPage.push(song);
       }
-      pages.push([song]); // Long song gets its own page
-    } else {
-      let currentMax = isOnePage ? 6 : maxNormal; // For onepage, we try to squeeze up to 6 non-long songs.
-      if (currentPage.length >= currentMax) {
-        pages.push(currentPage);
-        currentPage = [];
-      }
-      currentPage.push(song);
-    }
-  });
+    });
 
-  if (currentPage.length > 0) {
-    pages.push(currentPage);
+    if (currentPage.length > 0) {
+      pages.push(currentPage);
+    }
   }
+
+  // 若沒歌，給個空陣列
+  if (pages.length === 0) pages.push([]);
 
   return (
     <div className="flex flex-col bg-white">
       {pages.map((pageSongs, pageIdx) => {
         // 確認這頁是否為獨立的長歌頁面
-        const isLongSongPage = pageSongs.length === 1 && checkIsLongSong(pageSongs[0]);
+        const isLongSongPage = !isOnePage && pageSongs.length === 1 && checkIsLongSong(pageSongs[0]);
 
         return (
           <div key={pageIdx} className="pdf-page-wrapper" style={{ pageBreakBefore: pageIdx > 0 ? 'always' : 'auto' }}>
-            {/* 使用 HTML padding 作為實體的安全留白: 左右預留 30~40px，確保不被印表機切掉 */}
-            <div className={containerBase} style={{ padding: isOnePage ? '25px 30px' : '30px 40px', minHeight: '1050px', height: 'auto' }}>
+            {/* 使用 HTML padding 作為水平邊距 (px-[40px])，垂直方向讓 html2pdf margin 負責，並加上 minHeight: 979px 讓 footer 可以貼底 */}
+            <div className={containerBase} style={{ padding: isOnePage ? '15px 30px' : '20px 40px', minHeight: '979px', height: 'auto' }}>
               
               {/* Header (每一頁都有) */}
               <div className={`flex justify-between items-end border-slate-900 ${headerGap} mt-0 shrink-0`}>
