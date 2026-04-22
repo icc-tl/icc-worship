@@ -744,9 +744,10 @@ export default function App() {
       const el = document.getElementById('pdf-print-area');
       const dateStr = meta.date ? meta.date.replace(/-/g, '') : 'Date';
       
-      // 優化分頁配置: 加入 0.4 英吋上下安全邊界與左右 0.2 英吋，確保印表機不會切字
+      // 優化分頁配置: 將 margin 設回 0 以防止 html2canvas 縮放導致右側吃字
+      // 真正的安全邊距由 HTML Container 內部的 padding 負責把關
       const opt = { 
-        margin: [0.4, 0.2, 0.4, 0.2], 
+        margin: 0, 
         filename: `ICC_WorshipMap_${dateStr}.pdf`, 
         image: { type: 'jpeg', quality: 1 },
         html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0 }, 
@@ -1686,8 +1687,8 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
   // 如果是一頁版且歌曲超過 4 首，啟動「擁擠模式」進一步壓縮字體與間距
   const isCrowded = isOnePage && setlist.length > 4;
 
-  // 嚴格鎖定每頁高度為 1056px (96 DPI 下的 Letter 高度)
-  const containerBase = "bg-white text-slate-900 w-[816px] mx-auto box-border flex flex-col font-sans shrink-0 overflow-hidden relative";
+  // 移除了強制高度限制，改用 min-h，並讓 HTML padding 來擔任實體安全邊界
+  const containerBase = "bg-white text-slate-900 w-[816px] mx-auto box-border flex flex-col font-sans shrink-0 relative";
   
   const titleTextClass = isOnePage ? "text-[20px]" : (isLarge ? "text-[32px]" : "text-[26px]");
   const headerGap = isOnePage ? "mb-2 pb-1 border-b-[2px]" : "mb-5 pb-2 border-b-[3px]";
@@ -1800,8 +1801,9 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
         const isLongSongPage = pageSongs.length === 1 && checkIsLongSong(pageSongs[0]);
 
         return (
-          <React.Fragment key={pageIdx}>
-            <div className={containerBase} style={{ padding: isOnePage ? '25px 30px' : '30px 40px', minHeight: '980px', height: 'auto', overflow: 'visible' }}>
+          <div key={pageIdx} className="pdf-page-wrapper" style={{ pageBreakBefore: pageIdx > 0 ? 'always' : 'auto' }}>
+            {/* 使用 HTML padding 作為實體的安全留白: 左右預留 30~40px，確保不被印表機切掉 */}
+            <div className={containerBase} style={{ padding: isOnePage ? '25px 30px' : '30px 40px', minHeight: '1050px', height: 'auto' }}>
               
               {/* Header (每一頁都有) */}
               <div className={`flex justify-between items-end border-slate-900 ${headerGap} mt-0 shrink-0`}>
@@ -1906,10 +1908,7 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
                   <span className="text-[10px] font-bold text-slate-400 tracking-[0.2em] font-serif">{t('用心靈和誠實敬拜', language)}</span>
               </div>
             </div>
-            
-            {/* Insert explicit page break for html2pdf except after the last page */}
-            {pageIdx < pages.length - 1 && <div className="html2pdf__page-break w-full h-[1px] bg-transparent"></div>}
-          </React.Fragment>
+          </div>
         );
       })}
     </div>
