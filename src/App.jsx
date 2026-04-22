@@ -1695,7 +1695,6 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
     else scaleTier = 4;
   }
 
-  // 移除了強制高度限制，改用 min-h，並讓 HTML padding 來擔任實體安全邊界
   const containerBase = "bg-white text-slate-900 w-[816px] mx-auto box-border flex flex-col font-sans shrink-0 relative";
   
   const titleTextClass = isOnePage ? "text-[20px]" : (isLarge ? "text-[32px]" : "text-[26px]");
@@ -1703,14 +1702,14 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
   const mapGap = isOnePage ? (scaleTier > 1 ? "mb-1.5 p-1.5" : "mb-2 p-2") : "mb-5 p-3.5";
   const mapGridGap = isOnePage ? "gap-y-1" : "gap-y-3";
 
-  // 歌單地圖字體大小
+  // 大字版專用的歌單地圖字體大小
   const mapSongTitleFontSize = isLarge ? "text-[16px]" : (scaleTier > 1 ? "text-[11px]" : "text-[13px]");
   const mapKeyFontSize = isLarge ? "text-[10px]" : "text-[8px]";
   const mapTagFontSize = isLarge ? "text-[11px]" : (scaleTier > 1 ? "text-[7px]" : "text-[8px]");
   const mapArrowFontSize = isLarge ? "text-[10px]" : "text-[7px]";
   const mapNumberSize = isLarge ? "w-[24px] h-[24px] text-[12px]" : "w-[18px] h-[18px] text-[9px]";
 
-  // 歌詞字體大小調整 (根據 scaleTier 縮放)
+  // 歌詞字體大小調整 (擁擠模式會再縮小一點點)
   let lyricFontSize = "text-[12px] leading-[1.5]";
   let sectionFontSize = "text-[9px]";
   let songTitleFontSize = "text-[15px]";
@@ -1829,9 +1828,9 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
         const isLongSongPage = !isOnePage && pageSongs.length === 1 && checkIsLongSong(pageSongs[0]);
 
         return (
-          <div key={pageIdx} className="pdf-page-wrapper" style={{ pageBreakBefore: pageIdx > 0 ? 'always' : 'auto' }}>
-            {/* 使用 HTML padding 作為水平邊距 (px-[40px])，垂直方向讓 html2pdf margin 負責，並加上 minHeight: 979px 讓 footer 可以貼底 */}
-            <div className={containerBase} style={{ padding: isOnePage ? '15px 30px' : '20px 40px', minHeight: '979px', height: 'auto' }}>
+          <React.Fragment key={pageIdx}>
+            {/* 降低 minHeight 至 940px 以釋放緩衝空間，防止瀏覽器小數點誤差觸發 PDF 原生換頁 */}
+            <div className={`pdf-page-wrapper ${containerBase}`} style={{ padding: isOnePage ? '15px 30px' : '20px 40px', minHeight: '940px', height: 'auto' }}>
               
               {/* Header (每一頁都有) */}
               <div className={`flex justify-between items-end border-slate-900 ${headerGap} mt-0 shrink-0`}>
@@ -1936,7 +1935,10 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
                   <span className="text-[10px] font-bold text-slate-400 tracking-[0.2em] font-serif">{t('用心靈和誠實敬拜', language)}</span>
               </div>
             </div>
-          </div>
+
+            {/* 原生的 html2pdf 換頁元素，只在不是最後一頁時渲染 */}
+            {pageIdx < pages.length - 1 && <div className="html2pdf__page-break" style={{ height: 0, margin: 0, padding: 0, border: 'none' }}></div>}
+          </React.Fragment>
         );
       })}
     </div>
