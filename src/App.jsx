@@ -744,9 +744,9 @@ export default function App() {
       const el = document.getElementById('pdf-print-area');
       const dateStr = meta.date ? meta.date.replace(/-/g, '') : 'Date';
       
-      // 優化分頁配置: 加入 0.3 英吋上下安全邊界，確保不被印表機切掉
+      // 優化分頁配置: 加入 0.4 英吋上下安全邊界與左右 0.2 英吋，確保印表機不會切字
       const opt = { 
-        margin: [0.3, 0, 0.3, 0], 
+        margin: [0.4, 0.2, 0.4, 0.2], 
         filename: `ICC_WorshipMap_${dateStr}.pdf`, 
         image: { type: 'jpeg', quality: 1 },
         html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0 }, 
@@ -1686,9 +1686,8 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
   // 如果是一頁版且歌曲超過 4 首，啟動「擁擠模式」進一步壓縮字體與間距
   const isCrowded = isOnePage && setlist.length > 4;
 
-  // 移除 overflow-hidden 避免吃字，改用 min-h 確保版面，並縮小 padding
-  const containerBase = "bg-white text-slate-900 w-[816px] mx-auto box-border flex flex-col font-sans shrink-0 relative";
-  const containerSizing = isOnePage ? "min-h-[980px] p-[24px]" : "min-h-[980px] p-[40px]";
+  // 嚴格鎖定每頁高度為 1056px (96 DPI 下的 Letter 高度)
+  const containerBase = "bg-white text-slate-900 w-[816px] mx-auto box-border flex flex-col font-sans shrink-0 overflow-hidden relative";
   
   const titleTextClass = isOnePage ? "text-[20px]" : (isLarge ? "text-[32px]" : "text-[26px]");
   const headerGap = isOnePage ? "mb-2 pb-1 border-b-[2px]" : "mb-5 pb-2 border-b-[3px]";
@@ -1715,15 +1714,12 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
 
   // 提取排序與補齊段落邏輯
   const getOrderedLyrics = (item) => {
-    // 取得在 mapString 中實際使用到的標籤（去掉括號，如 V1(Jovy) -> V1）
     const mapTags = item.mapString ? item.mapString.split('-').filter(Boolean) : [];
     const uniqueBaseTags = Array.from(new Set(mapTags.map(t => t.replace(/\(.*?\)/g, '').trim().toUpperCase())));
     
-    // 【核心修復】優先尋找資料庫中的最新歌曲，若無則使用 Setlist 中的快照
     const dbSong = songsDb?.find(s => s.id === item.songId);
     const activeLyrics = (dbSong && dbSong.lyrics && dbSong.lyrics.length > 0) ? dbSong.lyrics : (item.lyrics || []);
 
-    // 把歌詞存成 Map
     const lyricsMap = new Map();
     activeLyrics.forEach(l => {
       if (l.section) lyricsMap.set(l.section.toUpperCase(), l.text || '');
@@ -1731,117 +1727,191 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
     
     const orderedLyrics = [];
     
-    // 1. 僅保留有文字內容的段落
     lyricsMap.forEach((text, tag) => {
         if (text.trim() !== '') {
             orderedLyrics.push({ section: tag, text });
         }
     });
 
-    // 2. 根據 Map String 的順序對 orderedLyrics 進行排序
     orderedLyrics.sort((a, b) => {
         const indexA = uniqueBaseTags.indexOf(a.section);
         const indexB = uniqueBaseTags.indexOf(b.section);
 
-        // 如果兩個都在 Map String 中，按 Map String 順序排
         if (indexA !== -1 && indexB !== -1) {
             return indexA - indexB;
         }
-        // 如果 A 在 Map String 中，B 不在，A 排前面
         if (indexA !== -1) return -1;
-        // 如果 B 在 Map String 中，A 不在，B 排前面
         if (indexB !== -1) return 1;
         
-        // 如果都不在 Map String 中，保持原始順序 (由資料庫抓出的順序)
         return 0;
     });
     
     return orderedLyrics;
   };
 
+  // --- 計算太長會爆頁的歌 (Long Song Heuristic) ---
+  const checkIsLongSong = (item) => {
+    const ordered = getOrderedLyrics(item);
+    let lines = 0;
+    ordered.forEach(s => {
+      lines += 1; // Tag title
+      if (s.text) lines += s.text.split('\n').length;
+      lines += 1; // Gap
+    });
+    
+    if (pdfMode === 'large') return lines > 18;
+    if (pdfMode === 'onepage') return lines > 45;
+    return lines > 28; // Normal Mode: > 28 lines breaks to a full 2-col page
+  };
+
+  // --- 計算分頁與切割邏輯 (Pagination Logic) ---
+  const pages = [];
+  let currentPage = [];
+  
+  const maxNormal = isLarge ? 2 : 4;
+
+  setlist.forEach((song) => {
+    const isLong = checkIsLongSong(song);
+    
+    if (isLong) {
+      if (currentPage.length > 0) {
+        pages.push(currentPage);
+        currentPage = [];
+      }
+      pages.push([song]); // Long song gets its own page
+    } else {
+      let currentMax = isOnePage ? 6 : maxNormal; // For onepage, we try to squeeze up to 6 non-long songs.
+      if (currentPage.length >= currentMax) {
+        pages.push(currentPage);
+        currentPage = [];
+      }
+      currentPage.push(song);
+    }
+  });
+
+  if (currentPage.length > 0) {
+    pages.push(currentPage);
+  }
+
   return (
-    <div className={`${containerBase} ${containerSizing}`}>
-      
-      {/* Header */}
-      <div className={`flex justify-between items-end border-slate-900 ${headerGap} mt-0`}>
-        <div className="flex flex-col gap-1">
-          <h1 className={`${titleTextClass} font-serif font-black tracking-widest text-slate-900 uppercase leading-none m-0`}>ICC Worship Song Map</h1>
-          <div className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded shadow-sm w-fit">
-            <CalendarDays size={12} className="text-sky-500" />
-            <span className="text-[11px] font-bold tracking-[0.15em] font-mono leading-none pt-[1px]">
-              {meta.date?.replace(/-/g, '/') || 'YYYY / MM / DD'}
-            </span>
-          </div>
-        </div>
-        <div className="text-right flex flex-col items-end gap-1">
-          <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Worship Leader</span>
-          <span className="text-[15px] font-serif font-bold text-slate-800 leading-none">{meta.wl || t('未指定', language)}</span>
-        </div>
-      </div>
+    <div className="flex flex-col bg-white">
+      {pages.map((pageSongs, pageIdx) => {
+        // 確認這頁是否為獨立的長歌頁面
+        const isLongSongPage = pageSongs.length === 1 && checkIsLongSong(pageSongs[0]);
 
-      {/* Highlighted Song Map Section */}
-      <div className={`${mapGap} bg-slate-50 rounded-lg border border-slate-200`}>
-        <div className={`grid grid-cols-2 gap-x-6 ${mapGridGap}`}>
-          {setlist.map((item, idx) => (
-            <div key={idx} className="flex gap-2.5 items-start">
-              <div className={`${mapNumberSize} shrink-0 bg-slate-900 text-white rounded-[4px] flex items-center justify-center font-bold font-serif mt-[1px] shadow-sm`}>
-                {idx + 1}
-              </div>
-              <div className="flex-1 overflow-hidden">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className={`font-bold ${mapSongTitleFontSize} font-serif leading-none truncate`}>{item.title}</span>
-                  <span className={`${mapKeyFontSize} font-mono font-bold text-sky-600 bg-sky-100/80 px-1 py-[2px] rounded leading-none shrink-0 border border-sky-200`}>{item.key}</span>
-                </div>
-                <div className="flex flex-wrap gap-0.5 items-center">
-                  {item.mapString ? item.mapString.split('-').map((tag, tIdx) => (
-                    <div key={tIdx} className="flex items-center">
-                      <span className={`inline-flex items-center justify-center px-1.5 py-[2px] bg-white border border-slate-300 text-slate-600 ${mapTagFontSize} font-bold font-mono rounded-[3px] shadow-sm`}>
-                        {tag}
-                      </span>
-                      {tIdx < item.mapString.split('-').length - 1 && (
-                        <span className={`text-slate-300 mx-[2px] font-bold ${mapArrowFontSize}`}>→</span>
-                      )}
-                    </div>
-                  )) : <span className="text-[8px] text-slate-400 italic">{t('尚未設定段落', language)}</span>}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Lyrics Layout in Rows (Guarantees Left-Right Order & Prevents Messy Page Breaks) */}
-      <div className={`flex flex-col flex-1 ${isOnePage ? 'mt-1' : 'mt-4'}`}>
-        {Array.from({ length: Math.ceil(setlist.length / 2) }).map((_, rowIdx) => {
-          const rowItems = setlist.slice(rowIdx * 2, rowIdx * 2 + 2);
-          return (
-            <div key={rowIdx} className={`flex w-full ${rowMargin} pdf-avoid-break`} style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
-              {rowItems.map((item, colIdx) => (
-                <div key={colIdx} className={`w-1/2 ${colPadding}`}>
-                  <div className={`flex items-center gap-2 ${titleMargin} border-b border-slate-200`}>
-                    <span className={`text-slate-300 font-black font-serif leading-none ${songNumberFontSize}`}>{rowIdx * 2 + colIdx + 1}.</span>
-                    <h2 className={`${songTitleFontSize} font-bold font-serif tracking-wide text-slate-900 leading-none pt-1`}>{item.title}</h2>
+        return (
+          <React.Fragment key={pageIdx}>
+            <div className={containerBase} style={{ padding: isOnePage ? '25px 30px' : '30px 40px', minHeight: '980px', height: 'auto', overflow: 'visible' }}>
+              
+              {/* Header (每一頁都有) */}
+              <div className={`flex justify-between items-end border-slate-900 ${headerGap} mt-0 shrink-0`}>
+                <div className="flex flex-col gap-1">
+                  <h1 className={`${titleTextClass} font-serif font-black tracking-widest text-slate-900 uppercase leading-none m-0`}>ICC Worship Song Map</h1>
+                  <div className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded shadow-sm w-fit">
+                    <CalendarDays size={12} className="text-sky-500" />
+                    <span className="text-[11px] font-bold tracking-[0.15em] font-mono leading-none pt-[1px]">
+                      {meta.date?.replace(/-/g, '/') || 'YYYY / MM / DD'}
+                    </span>
                   </div>
-                  <div className={lyricSpace}>
-                    {getOrderedLyrics(item).map((s, si) => (
-                      <div key={si} className="pl-2 border-l-[3px] border-sky-300">
-                        <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getFullTagExplanation(s.section, language)}</div>
-                        {s.text && <div className={`whitespace-pre-wrap ${lyricFontSize} text-slate-800 font-sans`}>{s.text}</div>}
+                </div>
+                <div className="text-right flex flex-col items-end gap-1">
+                  <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Worship Leader</span>
+                  <span className="text-[15px] font-serif font-bold text-slate-800 leading-none">{meta.wl || t('未指定', language)}</span>
+                </div>
+              </div>
+
+              {/* Highlighted Song Map Section (每一頁都有，永遠顯示完整歌單 Map) */}
+              <div className={`${mapGap} bg-slate-50 rounded-lg border border-slate-200 shrink-0`}>
+                <div className={`grid grid-cols-2 gap-x-6 ${mapGridGap}`}>
+                  {setlist.map((item, idx) => (
+                    <div key={idx} className="flex gap-2.5 items-start">
+                      <div className={`${mapNumberSize} shrink-0 bg-slate-900 text-white rounded-[4px] flex items-center justify-center font-bold font-serif mt-[1px] shadow-sm`}>
+                        {idx + 1}
                       </div>
-                    ))}
-                  </div>
+                      <div className="flex-1 overflow-hidden">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className={`font-bold ${mapSongTitleFontSize} font-serif leading-none truncate`}>{item.title}</span>
+                          <span className={`${mapKeyFontSize} font-mono font-bold text-sky-600 bg-sky-100/80 px-1 py-[2px] rounded leading-none shrink-0 border border-sky-200`}>{item.key}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-0.5 items-center">
+                          {item.mapString ? item.mapString.split('-').map((tag, tIdx) => (
+                            <div key={tIdx} className="flex items-center">
+                              <span className={`inline-flex items-center justify-center px-1.5 py-[2px] bg-white border border-slate-300 text-slate-600 ${mapTagFontSize} font-bold font-mono rounded-[3px] shadow-sm`}>
+                                {tag}
+                              </span>
+                              {tIdx < item.mapString.split('-').length - 1 && (
+                                <span className={`text-slate-300 mx-[2px] font-bold ${mapArrowFontSize}`}>→</span>
+                              )}
+                            </div>
+                          )) : <span className="text-[8px] text-slate-400 italic">{t('尚未設定段落', language)}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          );
-        })}
-      </div>
+              </div>
 
-      {/* Footer */}
-      <div className="mt-auto pt-3 border-t-2 border-slate-900 flex justify-between items-center">
-          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Irvine City Church</span>
-          <span className="text-[10px] font-bold text-slate-400 tracking-[0.2em] font-serif">{t('用心靈和誠實敬拜', language)}</span>
-      </div>
+              {/* Lyrics Layout in Rows */}
+              <div className={`flex flex-col flex-1 ${isOnePage ? 'mt-2' : 'mt-4'}`}>
+                {isLongSongPage ? (
+                  // --- 單首長歌：雙欄排版模式 ---
+                  <div className={`w-full ${rowMargin} pdf-avoid-break`}>
+                    <div className={`flex items-center gap-2 ${titleMargin} border-b border-slate-200 mb-4`}>
+                      <span className={`text-slate-300 font-black font-serif leading-none ${songNumberFontSize}`}>{setlist.indexOf(pageSongs[0]) + 1}.</span>
+                      <h2 className={`${songTitleFontSize} font-bold font-serif tracking-wide text-slate-900 leading-none pt-1`}>{pageSongs[0].title}</h2>
+                    </div>
+                    <div style={{ columnCount: 2, columnGap: '2rem' }} className={lyricSpace}>
+                      {getOrderedLyrics(pageSongs[0]).map((s, si) => (
+                        <div key={si} className="pl-2 border-l-[3px] border-sky-300 inline-block w-full mb-3" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
+                          <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getFullTagExplanation(s.section, language)}</div>
+                          {s.text && <div className={`whitespace-pre-wrap ${lyricFontSize} text-slate-800 font-sans`}>{s.text}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  // --- 普通歌曲：雙格 Grid 排版模式 ---
+                  Array.from({ length: Math.ceil(pageSongs.length / 2) }).map((_, rowIdx) => {
+                    const rowItems = pageSongs.slice(rowIdx * 2, rowIdx * 2 + 2);
+                    return (
+                      <div key={rowIdx} className={`flex w-full ${rowMargin} pdf-avoid-break`} style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
+                        {rowItems.map((item, colIdx) => {
+                          const globalIdx = setlist.indexOf(item);
+                          return (
+                            <div key={colIdx} className={`w-1/2 ${colPadding}`}>
+                              <div className={`flex items-center gap-2 ${titleMargin} border-b border-slate-200`}>
+                                <span className={`text-slate-300 font-black font-serif leading-none ${songNumberFontSize}`}>{globalIdx + 1}.</span>
+                                <h2 className={`${songTitleFontSize} font-bold font-serif tracking-wide text-slate-900 leading-none pt-1`}>{item.title}</h2>
+                              </div>
+                              <div className={lyricSpace}>
+                                {getOrderedLyrics(item).map((s, si) => (
+                                  <div key={si} className="pl-2 border-l-[3px] border-sky-300 inline-block w-full mb-1">
+                                    <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getFullTagExplanation(s.section, language)}</div>
+                                    {s.text && <div className={`whitespace-pre-wrap ${lyricFontSize} text-slate-800 font-sans`}>{s.text}</div>}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="mt-auto pt-3 border-t-2 border-slate-900 flex justify-between items-center shrink-0">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Irvine City Church</span>
+                  <span className="text-[10px] font-bold text-slate-400 tracking-[0.2em] font-serif">{t('用心靈和誠實敬拜', language)}</span>
+              </div>
+            </div>
+            
+            {/* Insert explicit page break for html2pdf except after the last page */}
+            {pageIdx < pages.length - 1 && <div className="html2pdf__page-break w-full h-[1px] bg-transparent"></div>}
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 };
