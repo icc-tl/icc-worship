@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Plus, Trash2, ArrowUp, ArrowDown, Edit2, X, ChevronLeft, ChevronRight, Download, FileText, Music, Eye, Database, BookOpen, Save, CalendarDays, User, Home, ListMusic, Lock, Unlock, Youtube, Sparkles, Wand2, Loader2, Crown, Code, Layers, Globe } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, signInWithCustomToken, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 // -----------------------------------------------------------------------------
@@ -21,6 +21,14 @@ const TRANSLATIONS = {
   "取消返回": "Cancel",
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
+  "登出": "Sign Out",
+  "驗證中...": "Verifying...",
+  "嘗試次數過多，請稍候幾分鐘再試。": "Too many attempts. Please wait a few minutes and try again.",
+  "網路連線失敗，請確認網路後再試。": "Network error. Check your connection and try again.",
+  "主領帳號尚未建立，請洽網站管理者。": "The leader account has not been set up yet. Please contact the site admin.",
+  "無法連線至雲端資料庫，畫面上的內容可能不是最新的。": "Cannot reach the cloud database. What you see may be out of date.",
+  "無法讀取雲端詩歌庫，畫面上的內容可能不是最新的。": "Cannot load the cloud song library. What you see may be out of date.",
+  "無法讀取雲端歌單，畫面上的內容可能不是最新的。": "Cannot load cloud setlists. What you see may be out of date.",
   "透過此功能，您可以將過往的 SongMap 快速匯入系統，協助擴充雲端歌單。": "With this feature, you can quickly import past SongMaps into the system to help expand the cloud song library.",
   "請先申請或登入": "Please register or login to your ",
   "Google Gemini AI 免費帳號": "free Google Gemini AI account",
@@ -168,6 +176,12 @@ const firebaseAuth = getAuth(firebaseApp);
 const firestoreDb = getFirestore(firebaseApp);
 const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'icc-worship-hub';
 
+// 主領共用帳號的識別碼。這不是機密，主領也不會看到 ——
+// 登入視窗只要求輸入密碼，信箱由程式自動帶入。
+// 密碼由 Firebase 伺服器驗證，不存在於前端。
+// 要換密碼：Firebase Console → Authentication → 使用者 → 重設密碼（不需重新部署）
+const ADMIN_EMAIL = 'timlin.ty@gmail.com';
+
 // -----------------------------------------------------------------------------
 // JSON 處理與清理工具
 // -----------------------------------------------------------------------------
@@ -212,42 +226,6 @@ const QUICK_FILTERS = [
   { label: 'KUA', query: 'KUA' },
   { label: 'SOP', query: 'SOP' },
   { label: 'Multitrack', query: 'mt' }
-];
-
-const MOCK_SONGS = [
-  { id: '1', title: '我神我王', artist: '讚美之泉', defaultKey: 'D', youtubeId: '', hasMultitrack: true, lyrics: [{ section: 'V', text: '除祢以外天上有誰祢是我所愛慕\n雖我肉體漸漸衰退祢是我的力量' }, { section: 'PC', text: '走過死蔭幽谷我仍要宣揚\n祢與我同在祢使軟弱者得剛強' }, { section: 'C', text: '我神我王我信靠祢\n我的盼望我仰望祢\n祢是我心裡的力量\n我的福分直到永遠' }, { section: 'B', text: '受患難卻不被壓碎\n心困惑卻沒有絕望\n受逼迫卻不被撇棄\n被打倒卻沒有滅亡' }] },
-  { id: '2', title: '哈...哈利路亞', artist: '約書亞樂團', defaultKey: 'F', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V', text: '哈利路亞 讚美聲響起\n歸給萬王之王宇宙萬物的主宰\n天使天軍全地都呼喊\n哈利路亞 讚美主聖名' }, { section: 'C', text: '哈哈利路亞我們高舉祢\n用心靈和聲音來榮耀祢\n哈哈利路亞迴響在全地\n祢恩典的呼喚和豐盛的慈愛' }] },
-  { id: '3', title: '最真實的我', artist: 'The Hope', defaultKey: 'D', youtubeId: '', hasMultitrack: true, lyrics: [{ section: 'V1', text: '祢全然的愛我最真實的我\n祢全然接納我即或我軟弱\n生命中的每一步有祢豐盛恩典\n使我更靠近祢' }, { section: 'V2', text: '祢全然的愛我緊緊擁抱我\n祢全然接納我永不離開我\n生命中的每一步有祢豐盛恩典\n使我更靠近祢' }, { section: 'C', text: '我只想要藏在祢翅膀蔭下\n渴求能更多停留在祢同在\n生命最大的盼望就在祢恩典之中\n祢就站立在我的身旁' }] },
-  { id: '4', title: '只為祢國祢名', artist: '真道教會', defaultKey: 'E', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V1', text: '祢創造了我的生命為我眾罪釘十架\n祢的犧牲完全救贖我使我生命美麗' }, { section: 'V2', text: '聽見祢呼召的聲音 願成為祢的器皿\n我願降服用我全人全心差遣我我在這裡' }, { section: 'C', text: '世上所有金銀珍寶和這世界所提供的美好\n我願放下只為要跟隨祢回應祢榮耀呼召\n直到那日 天地廢去我的生命呼吸將要停息\n跟隨我主何等榮耀歡喜\n我獻上自己只為祢國祢名' }] },
-  { id: '7', title: '普天下歡慶', artist: 'Kua', defaultKey: 'E', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V', text: '普天下當向耶和華歡呼\n你們當樂意事奉耶和華\n當來向祂歌唱' }, { section: 'C', text: '當稱謝進入祂的門當讚美進入祂的院\n當感謝祂 稱頌祂的名' }, { section: 'B', text: '來向祂歡呼來向祂跳舞' }] },
-  { id: '8', title: '不停讚美祢', artist: 'SOP', defaultKey: 'E', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V', text: '時時稱頌祢向祢來歌唱\n因祢是拯救我們偉大的神' }, { section: 'C', text: '不停讚美祢 大聲讚美祢\n唯有祢配得榮耀尊貴權柄' }, { section: 'B', text: '我讚美讚美不停讚美\n跳舞跳舞不停跳舞' }] },
-  { id: '9', title: '不停湧出來', artist: '新店行道會', defaultKey: 'F', youtubeId: '', hasMultitrack: true, lyrics: [{ section: 'V', text: '救恩臨到我生命 我心激動不已\n罪污全被洗潔淨 我心激動不已' }, { section: 'PC', text: '在我裡面愛如泉源\n不停湧出來不停湧出來' }, { section: 'C', text: '啊我要盡情跳舞\n我所有掛慮全被取代' }] },
-  { id: '10', title: '深深地敬拜', artist: 'SOP', defaultKey: 'D', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V', text: '在我心門不停地叩門\n渴望愛我每天與我同行' }, { section: 'C', text: '深深地敬拜 深深地獻上我的愛' }] },
-  { id: '13', title: '前來敬拜', artist: '讚美之泉', defaultKey: 'F', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V', text: '哈利路亞哈利路亞\n前來敬拜永遠的君王' }, { section: 'C', text: '榮耀尊貴 能力權柄歸於祢' }] },
-  { id: '14', title: '獻上尊榮', artist: '讚美之泉', defaultKey: 'F', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V', text: '耶穌基督 榮耀父神彰顯' }, { section: 'C', text: '獻上尊榮 尊榮' }] },
-  { id: '15', title: '永恆唯一的盼望', artist: '約書亞樂團', defaultKey: 'F', youtubeId: '', hasMultitrack: true, lyrics: [{ section: 'V', text: '有一位真神祂名字叫耶穌' }, { section: 'C', text: '耶穌是生命一切問題的解答' }] },
-  { id: '16', title: 'You are good', artist: 'Bethel Music', defaultKey: 'G', youtubeId: '', hasMultitrack: true, lyrics: [{ section: 'V1', text: 'I want to scream it out' }, { section: 'C', text: 'And I sing because you are good' }] },
-  { id: '17', title: '只想要歌唱', artist: '約書亞樂團', defaultKey: 'A', youtubeId: '', hasMultitrack: false, lyrics: [{ section: 'V1', text: '這絕不是表演不唱空洞語言' }, { section: 'C', text: '祢配得最高敬拜' }] }
-];
-
-const MOCK_SETLISTS = [
-  {
-    id: 'mock-setlist-1', date: '2025-02-09', wl: 'Jovy and Rudy', youtubePlaylistUrl: 'https://youtube.com/playlist?list=PLexample123', updatedAt: new Date().toISOString(),
-    songs: [
-      { id: 'm1', songId: '1', title: '我神我王', key: 'D', mapString: 'I-V(Jovy)-V(Alex)-PC-C-C-V-PC-C-C-B-B-B-C-C-L1', lyrics: MOCK_SONGS.find(s=>s.id==='1')?.lyrics || [] },
-      { id: 'm2', songId: '2', title: '哈...哈利路亞', key: 'F', mapString: 'V-C-V-C-I-C-C-V-C-L1-L1', lyrics: MOCK_SONGS.find(s=>s.id==='2')?.lyrics || [] },
-      { id: 'm3', songId: '3', title: '最真實的我', key: 'D', mapString: 'V1-V2-C-V2-C-C-C-L3', lyrics: MOCK_SONGS.find(s=>s.id==='3')?.lyrics || [] },
-      { id: 'm4', songId: '4', title: '只為祢國祢名', key: 'D-E', mapString: 'I-V1(Jovy)-V2-C-V1-V2-C-C-FW-升E-C-L2-L2', lyrics: MOCK_SONGS.find(s=>s.id==='4')?.lyrics || [] }
-    ]
-  },
-  {
-    id: 'mock-setlist-2', date: '2026-01-09', wl: '佳綺師母/Rudy', youtubePlaylistUrl: '', updatedAt: new Date().toISOString(),
-    songs: [
-      { id: 'm5', songId: '7', title: '普天下歡慶', key: 'E', mapString: 'I-V-C-V-C-C-I-B-B-B-B-C-C-L1', lyrics: MOCK_SONGS.find(s=>s.id==='7')?.lyrics || [] },
-      { id: 'm6', songId: '8', title: '不停讚美祢', key: 'E', mapString: 'I-V-C-V-C- С-В-В-I- C-C', lyrics: MOCK_SONGS.find(s=>s.id==='8')?.lyrics || [] },
-      { id: 'm7', songId: '9', title: '不停湧出來', key: 'F', mapString: 'I-V-PC-C-I-V-PC-PC-C-C-C-L1-L1', lyrics: MOCK_SONGS.find(s=>s.id==='9')?.lyrics || [] }
-    ]
-  }
 ];
 
 const generateId = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `id-${Date.now()}-${Math.floor(Math.random()*1000)}`;
@@ -308,16 +286,21 @@ export default function App() {
 
   // --- Auth & Admin State ---
   const [user, setUser] = useState(null);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
 
+  // 管理權限直接由登入狀態推導，不另存 state —— 避免前端狀態與實際權限脫節。
+  // 真正的權限判定在 Firestore 規則，這裡只決定 UI 要不要顯示編輯按鈕。
+  const isAdmin = !!user && !user.isAnonymous;
+
   // --- Database State ---
-  const [songsDb, setSongsDb] = useState([]); 
+  const [songsDb, setSongsDb] = useState([]);
   const [setlistsDb, setSetlistsDb] = useState([]);
   const [isDbReady, setIsDbReady] = useState(false);
+  const [dbError, setDbError] = useState('');
 
   // --- View State ---
   const [view, setView] = useState('home'); 
@@ -382,20 +365,24 @@ export default function App() {
   // Firebase Auth
   // -----------------------------------------------------------------------------
   useEffect(() => {
-    const initAuth = async () => {
+    // 由 onAuthStateChanged 單一入口決定登入狀態：
+    // 已登入（主領帳號或既有匿名 session）就沿用，只有完全沒有 session 才建立匿名身分。
+    // 這樣主領重新整理頁面後不會被降回訪客。
+    const unsubscribe = onAuthStateChanged(firebaseAuth, async (account) => {
+      if (account) { setUser(account); return; }
+      setUser(null);
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(firebaseAuth, __initial_auth_token);
         } else {
           await signInAnonymously(firebaseAuth);
         }
-      } catch (error) { 
-        console.error("Firebase Auth Error:", error); 
+      } catch (error) {
+        console.error("Firebase Auth Error:", error);
+        // 存原文當 key，在畫面上才依語言翻譯，避免語言切換時重建連線
+        setDbError('無法連線至雲端資料庫，畫面上的內容可能不是最新的。');
       }
-    };
-    initAuth();
-    
-    const unsubscribe = onAuthStateChanged(firebaseAuth, setUser);
+    });
     return () => unsubscribe();
   }, []);
 
@@ -408,36 +395,28 @@ export default function App() {
     // 1. Sync Songs
     const songsRef = collection(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs');
     const unsubSongs = onSnapshot(songsRef, (snapshot) => {
-      if (snapshot.empty && songsDb.length === 0) {
-        setSongsDb(MOCK_SONGS);
-        setIsDbReady(true);
-        MOCK_SONGS.forEach(s => setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', s.id), s).catch(console.error));
-      } else if (!snapshot.empty) {
-        const loaded = snapshot.docs.map(d => d.data());
-        loaded.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
-        setSongsDb(loaded);
-        setIsDbReady(true);
-      }
-    }, (err) => {
-      console.error("Firestore Songs Error:", err);
-      setSongsDb(MOCK_SONGS);
+      const loaded = snapshot.docs.map(d => d.data());
+      loaded.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+      setSongsDb(loaded);
       setIsDbReady(true);
+      setDbError('');
+    }, (err) => {
+      // 讀不到就明講，不再靜默改用假資料 —— 否則主領會以為自己在編輯真的歌單
+      console.error("Firestore Songs Error:", err);
+      setIsDbReady(true);
+      setDbError('無法讀取雲端詩歌庫，畫面上的內容可能不是最新的。');
     });
 
     // 2. Sync Setlists
     const setlistsRef = collection(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists');
     const unsubSetlists = onSnapshot(setlistsRef, (snapshot) => {
-      if (snapshot.empty && setlistsDb.length === 0) {
-        setSetlistsDb(MOCK_SETLISTS);
-        MOCK_SETLISTS.forEach(s => setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', s.id), s).catch(console.error));
-      } else if (!snapshot.empty) {
-        const loaded = snapshot.docs.map(d => d.data());
-        loaded.sort((a, b) => new Date(b.date) - new Date(a.date));
-        setSetlistsDb(loaded);
-      }
+      const loaded = snapshot.docs.map(d => d.data());
+      loaded.sort((a, b) => new Date(b.date) - new Date(a.date));
+      setSetlistsDb(loaded);
+      setDbError('');
     }, (err) => {
       console.error("Firestore Setlists Error:", err);
-      setSetlistsDb(MOCK_SETLISTS);
+      setDbError('無法讀取雲端歌單，畫面上的內容可能不是最新的。');
     });
 
     return () => { unsubSongs(); unsubSetlists(); };
@@ -533,13 +512,47 @@ export default function App() {
   };
 
   const requireAdmin = (cb) => {
-    if (isAdmin) cb(); 
+    if (isAdmin) cb();
     else { setPendingAuthAction(() => cb); setAuthPassword(''); setAuthError(''); setShowAuthModal(true); }
   };
 
-  const handleAuthSubmit = () => {
-    if (authPassword === 'ICCWS1025') { setIsAdmin(true); setShowAuthModal(false); if (pendingAuthAction) pendingAuthAction(); setPendingAuthAction(null); }
-    else setAuthError(t('密碼錯誤。', language));
+  // 密碼交由 Firebase 伺服器驗證。前端不持有、也無從比對密碼，
+  // 因此沒有可以被繞過的檢查 —— 真正的把關在 Firestore 規則。
+  const handleAuthSubmit = async () => {
+    if (!authPassword || isAuthenticating) return;
+    setIsAuthenticating(true);
+    setAuthError('');
+    try {
+      await signInWithEmailAndPassword(firebaseAuth, ADMIN_EMAIL, authPassword);
+      setAuthPassword('');
+      setShowAuthModal(false);
+      if (pendingAuthAction) pendingAuthAction();
+      setPendingAuthAction(null);
+    } catch (error) {
+      console.error("Sign-in Error:", error);
+      const code = error?.code || '';
+      if (code === 'auth/too-many-requests') {
+        setAuthError(t('嘗試次數過多，請稍候幾分鐘再試。', language));
+      } else if (code === 'auth/network-request-failed') {
+        setAuthError(t('網路連線失敗，請確認網路後再試。', language));
+      } else if (code === 'auth/operation-not-allowed' || code === 'auth/user-not-found') {
+        setAuthError(t('主領帳號尚未建立，請洽網站管理者。', language));
+      } else {
+        setAuthError(t('密碼錯誤。', language));
+      }
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  // 共用電腦上用完請登出，把權限交回訪客模式
+  const handleSignOut = async () => {
+    try {
+      await signOut(firebaseAuth);
+      setView('home');
+    } catch (error) {
+      console.error("Sign-out Error:", error);
+    }
   };
 
   const filteredHomeSetlists = setlistsDb.filter(item => {
@@ -991,11 +1004,14 @@ export default function App() {
             <div className="text-slate-600 text-[14px] leading-relaxed mb-6 font-medium bg-sky-50 p-4 rounded-xl border border-sky-100 shadow-inner">
               {t('編輯功能目前僅開放主領使用，', language)}<br/>{t('如需權限請洽師母 🙏', language)}
             </div>
-            <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuthSubmit()} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none transition focus:border-sky-500 text-center text-lg tracking-widest mb-2 shadow-sm" placeholder="******" autoFocus />
+            <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuthSubmit()} disabled={isAuthenticating} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none transition focus:border-sky-500 text-center text-lg tracking-widest mb-2 shadow-sm disabled:opacity-60" placeholder="******" autoComplete="current-password" autoFocus />
             {authError && <p className="text-red-500 text-xs font-bold mb-2">{String(authError)}</p>}
             <div className="flex justify-center gap-3 mt-6">
-              <button onClick={() => setShowAuthModal(false)} className="px-5 py-2.5 text-sm text-slate-500 hover:bg-slate-100 rounded-xl transition font-bold">{t('取消返回', language)}</button>
-              <button onClick={handleAuthSubmit} className="px-6 py-2.5 text-sm bg-sky-500 hover:bg-sky-600 text-white rounded-xl transition shadow-md font-bold">{t('確認解鎖', language)}</button>
+              <button onClick={() => setShowAuthModal(false)} disabled={isAuthenticating} className="px-5 py-2.5 text-sm text-slate-500 hover:bg-slate-100 rounded-xl transition font-bold disabled:opacity-50">{t('取消返回', language)}</button>
+              <button onClick={handleAuthSubmit} disabled={isAuthenticating || !authPassword} className="px-6 py-2.5 text-sm bg-sky-500 hover:bg-sky-600 text-white rounded-xl transition shadow-md font-bold disabled:opacity-50 flex items-center gap-2">
+                {isAuthenticating && <Loader2 size={14} className="animate-spin"/>}
+                {isAuthenticating ? t('驗證中...', language) : t('確認解鎖', language)}
+              </button>
             </div>
           </div>
         </div>
@@ -1090,7 +1106,14 @@ export default function App() {
         <div className="bg-white border-b border-slate-200 text-slate-600 text-xs py-3 px-4 sm:px-6 flex flex-col sm:flex-row justify-center sm:justify-between items-center relative z-50 shadow-sm gap-3">
           <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 w-full sm:w-auto">
             <div className="flex items-center gap-2">
-              {isAdmin ? <span className="text-sky-600 font-bold flex items-center gap-1"><Unlock size={12}/> {t('權限已解鎖', language)}</span> : <span className="flex items-center gap-1"><Lock size={12}/> {t('訪客模式', language)}</span>}
+              {isAdmin ? (
+                <>
+                  <span className="text-sky-600 font-bold flex items-center gap-1"><Unlock size={12}/> {t('權限已解鎖', language)}</span>
+                  <button onClick={handleSignOut} className="text-slate-400 hover:text-red-600 transition font-bold underline underline-offset-2">{t('登出', language)}</button>
+                </>
+              ) : (
+                <span className="flex items-center gap-1"><Lock size={12}/> {t('訪客模式', language)}</span>
+              )}
             </div>
             {/* 資料庫連線狀態指示 */}
             <div className="flex items-center gap-1.5 border-l border-slate-200 pl-3 sm:pl-4">
@@ -1114,6 +1137,13 @@ export default function App() {
             
             <button onClick={() => requireAdmin(() => setView('manage'))} className="hover:text-sky-600 transition flex items-center gap-1"><Database size={12}/> {t('雲端詩歌庫', language)}</button>
           </div>
+        </div>
+      )}
+
+      {/* 資料庫連線異常提示 —— 讓主領知道現在不該編輯 */}
+      {dbError && view !== 'preview' && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs sm:text-sm py-2.5 px-4 sm:px-6 flex items-center justify-center gap-2 font-bold text-center">
+          <X size={16} className="shrink-0"/> {t(dbError, language)}
         </div>
       )}
 

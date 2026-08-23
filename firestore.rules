@@ -1,0 +1,40 @@
+rules_version = '2';
+
+// -----------------------------------------------------------------------------
+// ICC Worship Corner — Firestore 安全規則
+//
+// 原則：
+//   讀取  任何人都可以（含未登入訪客，透過匿名登入）—— 歌手、樂手要能看歌單
+//   寫入  只有管理員名單內的帳號可以 —— 主領透過共用帳號登入
+//
+// 管理員名單放在 admin_uids 集合，一個文件代表一位管理員（文件 ID = 帳號 UID）。
+// 這份名單只能在 Firebase Console 手動維護，前端永遠不可寫入。
+// -----------------------------------------------------------------------------
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 管理員名單本身：前端完全不需要碰它
+    //（規則引擎讀取自己的資料時不受這裡限制，所以下面的 exists() 仍然有效）
+    match /artifacts/{appId}/public/data/admin_uids/{uid} {
+      allow read, write: if false;
+    }
+
+    // 詩歌庫與歌單
+    match /artifacts/{appId}/public/data/{collection}/{docId} {
+
+      function isAdmin() {
+        return request.auth != null
+          && exists(/databases/$(database)/documents/artifacts/$(appId)/public/data/admin_uids/$(request.auth.uid));
+      }
+
+      // 訪客（匿名登入）即可讀取
+      allow read: if request.auth != null;
+
+      // 只有管理員能寫，且只能寫這兩個集合
+      // —— 這裡明確列舉，順便擋掉對 admin_uids 的寫入
+      allow write: if isAdmin()
+        && collection in ['icc_songs', 'icc_setlists'];
+    }
+  }
+}
