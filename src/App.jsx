@@ -22,6 +22,9 @@ const TRANSLATIONS = {
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
   "登出": "Sign Out",
+  "改用新分頁開啟": "Open in a new tab",
+  "樂譜載入失敗": "Could not load the sheet",
+  "樂譜載入中...": "Loading sheet...",
   "無": "None",
   "先填好歌名後即可上傳樂譜，系統會自動先建立這首歌。": "Enter a song title first — uploading will create the song automatically.",
   "請先輸入歌名再上傳樂譜": "Enter a song title before uploading a sheet",
@@ -444,8 +447,97 @@ const TONE_STYLES = {
   diff:  { chip: 'bg-amber-500 text-white border-amber-500 shadow-sm', idle: 'bg-amber-50 text-amber-700 border-amber-300 hover:border-amber-500' },
 };
 
-// --- 內嵌樂譜檢視器：直接看，不強制下載 ---
+// --- 樂譜檢視器 ---
+// 用 PDF.js 自己把每頁畫到 canvas 上，而不是交給瀏覽器內建的 PDF 外掛。
+// 原因：內建外掛在各裝置行為差很多，iPad Safari 常常只顯示第一頁，
+// 而樂手主日多半就是拿平板看譜。自己渲染才能保證每台裝置一致。
+let pdfLibPromise = null;
+const loadPdfLib = () => {
+  if (!pdfLibPromise) {
+    pdfLibPromise = import('pdfjs-dist').then(async (lib) => {
+      const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+      lib.GlobalWorkerOptions.workerSrc = worker.default;
+      return lib;
+    });
+  }
+  return pdfLibPromise;
+};
+
 const SheetViewer = ({ sheet, language, height = '75vh' }) => {
+  const wrapRef = useRef(null);
+  const [doc, setDoc] = useState(null);
+  const [pageNum, setPageNum] = useState(1);
+  const [status, setStatus] = useState(sheet?.url ? 'loading' : 'idle');   // idle | loading | ready | error
+  const [zoom, setZoom] = useState(1);
+  const canvasRef = useRef(null);
+  const renderTaskRef = useRef(null);
+
+  // 換一份樂譜時由呼叫端的 key 觸發重新掛載，這裡只負責載入，
+  // 不在 effect 內同步重設狀態（那會造成連鎖渲染）
+  useEffect(() => {
+    if (!sheet?.url) return;
+    let cancelled = false;
+    (async () => {
+      const lib = await loadPdfLib();
+      const open = (url) => lib.getDocument({ url }).promise;
+      try {
+        let d;
+        try {
+          d = await open(sheet.url);
+        } catch {
+          // 樂譜標為 immutable 長期快取，若使用者手邊存著舊的、
+          // 缺少 CORS 標頭的回應，正常請求會被瀏覽器擋下。繞過快取重試一次。
+          if (cancelled) return;
+          d = await open(`${sheet.url}${sheet.url.includes('?') ? '&' : '?'}r=${Date.now()}`);
+        }
+        if (!cancelled) { setDoc(d); setStatus('ready'); }
+      } catch {
+        if (!cancelled) setStatus('error');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sheet?.url]);
+
+  // 畫出目前這一頁，寬度自動貼合容器
+  useEffect(() => {
+    if (!doc || !canvasRef.current) return;
+    let cancelled = false;
+
+    (async () => {
+      // 先確實等上一次的渲染結束再開始下一次。
+      // 設定 canvas.width 會清空畫布，若兩次繪製交錯，新畫的內容會被舊的抹掉。
+      const prev = renderTaskRef.current;
+      if (prev) {
+        prev.cancel();
+        try { await prev.promise; } catch { /* 取消必然 reject，屬預期 */ }
+        renderTaskRef.current = null;
+      }
+      if (cancelled) return;
+
+      let page;
+      try { page = await doc.getPage(pageNum); } catch { return; }
+      if (cancelled || !canvasRef.current) return;
+
+      const canvas = canvasRef.current;
+      const avail = (wrapRef.current?.clientWidth || 800) - 24;
+      const base = page.getViewport({ scale: 1 });
+      const scale = (avail / base.width) * zoom;
+      // 高解析螢幕要乘上 devicePixelRatio，否則譜會糊
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const viewport = page.getViewport({ scale: scale * dpr });
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.style.width = `${viewport.width / dpr}px`;
+      canvas.style.height = `${viewport.height / dpr}px`;
+
+      const task = page.render({ canvasContext: canvas.getContext('2d'), viewport });
+      renderTaskRef.current = task;
+      try { await task.promise; } catch { /* 換頁時被取消，忽略 */ }
+    })();
+
+    return () => { cancelled = true; };
+  }, [doc, pageNum, zoom]);
+
   if (!sheet) {
     return (
       <div className="flex flex-col items-center justify-center bg-slate-50 border border-dashed border-slate-200 rounded-xl text-slate-400" style={{ height }}>
@@ -454,19 +546,53 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
       </div>
     );
   }
+
+  const total = doc?.numPages || 0;
   return (
-    <div className="relative bg-slate-100 border border-slate-200 rounded-xl overflow-hidden shadow-inner" style={{ height }}>
-      <object data={`${sheet.url}#view=FitH`} type="application/pdf" className="w-full h-full">
-        {/* iPad／手機的 Safari 不一定能內嵌 PDF，退回明確的開啟按鈕 */}
-        <div className="flex flex-col items-center justify-center h-full gap-3 p-6 text-center">
-          <FileText size={36} className="text-slate-300" />
-          <p className="text-sm text-slate-500">{t('此裝置無法內嵌顯示，請點擊開啟', language)}</p>
-          <a href={sheet.url} target="_blank" rel="noopener noreferrer"
-             className="px-5 py-2.5 bg-sky-500 hover:bg-sky-600 text-white text-sm font-bold rounded-xl shadow-md transition">
-            {t('開啟樂譜', language)}
-          </a>
+    <div className="flex flex-col bg-slate-100 border border-slate-200 rounded-xl overflow-hidden" style={{ height }}>
+      {/* 工具列 */}
+      <div className="flex items-center justify-between gap-2 px-3 py-2 bg-white border-b border-slate-200 shrink-0">
+        <div className="flex items-center gap-1">
+          <button onClick={() => setPageNum(n => Math.max(1, n - 1))} disabled={pageNum <= 1 || !doc}
+            className="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-slate-50 disabled:opacity-30 transition"><ChevronLeft size={18}/></button>
+          <span className="text-xs font-mono font-bold text-slate-600 tabular-nums min-w-[62px] text-center">
+            {total ? `${pageNum} / ${total}` : '—'}
+          </span>
+          <button onClick={() => setPageNum(n => Math.min(total, n + 1))} disabled={pageNum >= total || !doc}
+            className="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-slate-50 disabled:opacity-30 transition"><ChevronRight size={18}/></button>
         </div>
-      </object>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setZoom(z => Math.max(0.5, +(z - 0.25).toFixed(2)))} disabled={zoom <= 0.5}
+            className="px-2 py-1 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-slate-50 text-sm font-bold disabled:opacity-30 transition">−</button>
+          <button onClick={() => setZoom(1)}
+            className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-500 hover:text-sky-600 hover:bg-slate-50 transition tabular-nums">{Math.round(zoom * 100)}%</button>
+          <button onClick={() => setZoom(z => Math.min(3, +(z + 0.25).toFixed(2)))} disabled={zoom >= 3}
+            className="px-2 py-1 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-slate-50 text-sm font-bold disabled:opacity-30 transition">＋</button>
+          <a href={sheet.url} target="_blank" rel="noopener noreferrer"
+             className="ml-1 p-1.5 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-slate-50 transition"><Eye size={16}/></a>
+        </div>
+      </div>
+
+      {/* 畫布 */}
+      <div ref={wrapRef} className="flex-1 overflow-auto custom-scrollbar p-3 flex justify-center items-start">
+        {status === 'loading' && (
+          <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
+            <Loader2 size={28} className="animate-spin"/>
+            <p className="text-xs">{t('樂譜載入中...', language)}</p>
+          </div>
+        )}
+        {status === 'error' && (
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6">
+            <FileText size={32} className="text-slate-300"/>
+            <p className="text-sm text-slate-500">{t('樂譜載入失敗', language)}</p>
+            <a href={sheet.url} target="_blank" rel="noopener noreferrer"
+               className="px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-sm font-bold rounded-xl shadow-md transition">
+              {t('改用新分頁開啟', language)}
+            </a>
+          </div>
+        )}
+        <canvas ref={canvasRef} className={`shadow-lg bg-white rounded ${status === 'ready' ? '' : 'hidden'}`} />
+      </div>
     </div>
   );
 };
@@ -1542,7 +1668,7 @@ export default function App() {
               </div>
             </div>
             <div className="flex-1 p-3 sm:p-4 bg-slate-50 overflow-hidden">
-              <SheetViewer sheet={previewSheet} language={language} height="100%" />
+              <SheetViewer key={previewSheet.id} sheet={previewSheet} language={language} height="100%" />
             </div>
           </div>
         </div>
@@ -2333,7 +2459,7 @@ export default function App() {
               </p>
             )}
 
-            <SheetViewer sheet={chosen} language={language} />
+            <SheetViewer key={chosen?.id || 'none'} sheet={chosen} language={language} />
           </div>
         );
       })()}
