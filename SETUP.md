@@ -95,3 +95,53 @@ artifacts / icc-worship-hub / public / data / admin_uids / <貼上剛剛的 UID>
 `src/App.jsx` 中的 `apiKey` 公開是正常的 —— 它只是專案識別碼，
 Google 設計上就是給前端使用的，不能用來繞過安全規則。
 真正的防線一直都是這份 `firestore.rules`。
+
+---
+
+# 樂譜功能設定（階段 2）
+
+樂譜的顯示、關聯、改調性、移除都只靠 Firestore，部署後即可使用。
+但**上傳新樂譜**與**永久刪除檔案**需要後端經手 R2 金鑰，
+因此要在 Vercel 設定環境變數。沒設定的話，其他功能照常運作，
+只有這兩個按鈕會回報伺服器未設定。
+
+## 在 Vercel 設定環境變數
+
+Vercel → 專案 `icc-worship` → Settings → Environment Variables，
+逐一新增以下七項（Production 與 Preview 都勾）：
+
+| 變數名稱 | 值從哪裡來 |
+|---|---|
+| `R2_ACCOUNT_ID` | 本機 `.env.local` 同名欄位 |
+| `R2_ACCESS_KEY_ID` | 同上 |
+| `R2_SECRET_ACCESS_KEY` | 同上 |
+| `R2_BUCKET` | `icc-sheets` |
+| `R2_PUBLIC_URL` | 本機 `.env.local` 同名欄位 |
+| `FIREBASE_API_KEY` | `src/App.jsx` 的 `fallbackConfig.apiKey`（本來就是公開值） |
+| `ADMIN_UID` | 主領帳號的 UID —— 與 Firestore `admin_uids` 底下那份文件的 ID 相同 |
+
+> R2 API token 若設了有效期限（TTL），到期後上傳功能會失效。
+> 屆時到 Cloudflare 重新產生一組，更新上面三個 R2 欄位即可。
+
+設定完成後需要**重新部署一次**才會生效
+（Vercel → Deployments → 最新一筆 → Redeploy）。
+
+## 樂譜管理怎麼用
+
+在「雲端詩歌庫 → 編輯某首歌」的頁面下半部：
+
+| 動作 | 說明 |
+|---|---|
+| **上傳樂譜** | 接受 PDF／JPG／PNG，上限 25 MB。會套用目前填的調性 |
+| **從待用庫加入** | 搜尋那 400 多份尚未關聯的樂譜，挑一份掛到這首歌 |
+| **改調性／註記** | 直接在欄位上改，點擊別處即自動儲存 |
+| **移除**（X） | 只取消關聯，樂譜回到待用庫，隨時能加回來或改掛別首歌 |
+| **永久刪除**（垃圾桶） | 連雲端檔案一起刪除，不可復原，需二次確認 |
+
+「改掛到別首歌」的做法：在原本的歌按「移除」，再到目標歌曲按「從待用庫加入」。
+
+## 樂手怎麼用
+
+首頁每份歌單旁邊有「**樂手版**」按鈕，**不需要登入**。
+點進去會依照該週歌單設定的調性，自動挑出對應調性的樂譜；
+若沒有完全吻合的調性，會顯示其他版本並標示「此為 F 調，本週為 D 調」。

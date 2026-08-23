@@ -22,6 +22,35 @@ const TRANSLATIONS = {
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
   "登出": "Sign Out",
+  "檔案上傳失敗，請再試一次。": "Upload failed. Please try again.",
+  "請先登入主領帳號": "Please sign in as a worship leader first",
+  "永久刪除": "Delete Forever",
+  "這會連雲端上的檔案一起刪除，無法復原。若只是想從這首歌拿掉，請改用旁邊的「移除」。": "This deletes the file from the cloud and cannot be undone. To just take it off this song, use Remove instead.",
+  "永久刪除樂譜？": "Delete sheet permanently?",
+  "永久刪除檔案（不可復原）": "Delete file permanently (cannot be undone)",
+  "上傳中...": "Uploading...",
+  "上傳樂譜": "Upload Sheet",
+  "僅顯示前 100 筆，請用搜尋縮小範圍": "Showing first 100 — use search to narrow down",
+  "加入": "Add",
+  "先看看內容": "Preview first",
+  "待用庫查無符合的樂譜": "No matching sheets in the pool",
+  "搜尋歌名、註記或調性...": "Search title, label, or key...",
+  "份尚未關聯的樂譜": "unlinked sheets",
+  "待用樂譜庫": "Sheet Pool",
+  "調性與註記改完點擊別處即自動儲存。移除只是取消關聯，樂譜會回到待用庫，隨時能重新加入或改掛到別首歌。": "Key and label save automatically when you click away. Removing only unlinks it — the sheet returns to the pool and can be re-added or moved to another song.",
+  "從這首歌移除（回到待用庫，可還原）": "Remove from this song (returns to pool, reversible)",
+  "註記（女聲／吉他…）": "Label (female / guitar…)",
+  "調性": "Key",
+  "檢視": "View",
+  "這首歌還沒有樂譜": "No sheets for this song yet",
+  "從待用庫加入": "Add from Pool",
+  "份": "sheets",
+  "樂譜管理": "Sheet Music",
+  "尚無樂譜": "No sheet music",
+  "樂譜": "Sheet Music",
+  "樂手版": "Musician View",
+  "開啟樂譜": "Open Sheet",
+  "已依本週歌單的調性自動挑選樂譜": "Sheets auto-selected to match this week\u2019s keys",
   "驗證中...": "Verifying...",
   "嘗試次數過多，請稍候幾分鐘再試。": "Too many attempts. Please wait a few minutes and try again.",
   "網路連線失敗，請確認網路後再試。": "Network error. Check your connection and try again.",
@@ -228,6 +257,58 @@ const QUICK_FILTERS = [
   { label: 'Multitrack', query: 'mt' }
 ];
 
+// -----------------------------------------------------------------------------
+// 樂譜工具
+// -----------------------------------------------------------------------------
+// 調性比較用：Bb 與 A# 視為同音，大小寫與全形一律統一
+const KEY_ALIASES = { 'A#': 'Bb', 'C#': 'Db', 'D#': 'Eb', 'F#': 'Gb', 'G#': 'Ab' };
+
+const normalizeKey = (k) => {
+  if (!k) return '';
+  const t = String(k).normalize('NFKC').trim().replace(/♭/g, 'b').replace(/♯/g, '#');
+  return t.split('-').map(part => {
+    const p = part.trim();
+    if (!p) return '';
+    const std = p[0].toUpperCase() + p.slice(1).toLowerCase();
+    return KEY_ALIASES[std] || std;
+  }).filter(Boolean).join('-');
+};
+
+// 依歌單當週的調性挑出最合適的樂譜
+// 完全相同 > 轉調字串的起始調相同 > 沒有標調性的通用譜 > 其他
+const pickSheetForKey = (sheets, wantedKey) => {
+  if (!sheets || sheets.length === 0) return null;
+  const want = normalizeKey(wantedKey);
+  if (!want) return sheets[0];
+  const wantRoot = want.split('-')[0];
+  const score = (sheet) => {
+    const k = normalizeKey(sheet.key);
+    if (!k) return 2;                       // 通用譜（沒標調性）
+    if (k === want) return 0;               // 完全吻合
+    if (k.split('-')[0] === wantRoot) return 1;  // 轉調譜的起始調相同
+    return 3;
+  };
+  return [...sheets].sort((a, b) => score(a) - score(b) || (a.pageCount || 1) - (b.pageCount || 1))[0];
+};
+
+// 這份譜的調性跟本週要用的調不一樣時，回傳提示文字
+const keyMismatchNote = (sheet, wantedKey, language) => {
+  const k = normalizeKey(sheet?.key);
+  const want = normalizeKey(wantedKey);
+  if (!k || !want || k === want) return null;
+  return language === 'en'
+    ? `Sheet in ${sheet.key}, this week in ${wantedKey}`
+    : `此為 ${sheet.key} 調，本週為 ${wantedKey} 調`;
+};
+
+const sheetLabel = (sheet, language) => {
+  const bits = [];
+  if (sheet.key) bits.push(sheet.key);
+  if (sheet.pageCount > 1) bits.push(language === 'en' ? `${sheet.pageCount} pages` : `${sheet.pageCount} 頁`);
+  if (sheet.label) bits.push(sheet.label);
+  return bits.join(' · ');
+};
+
 const generateId = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `id-${Date.now()}-${Math.floor(Math.random()*1000)}`;
 
 // -----------------------------------------------------------------------------
@@ -278,6 +359,45 @@ const FastTooltip = ({ text, position = 'top' }) => {
   );
 };
 
+// --- 單一樂譜連結（含調性不符提示）---
+const SheetLink = ({ sheet, wantedKey, language, compact }) => {
+  const note = keyMismatchNote(sheet, wantedKey, language);
+  return (
+    <a href={sheet.url} target="_blank" rel="noopener noreferrer"
+       className={`relative group/tt inline-flex items-center gap-1.5 rounded-lg border transition shadow-sm
+         ${compact ? 'px-2 py-1 text-[11px]' : 'px-3 py-1.5 text-xs'}
+         ${note ? 'bg-amber-50 border-amber-200 text-amber-700 hover:border-amber-400'
+                : 'bg-white border-slate-200 text-slate-700 hover:border-sky-400 hover:text-sky-600'}`}>
+      <FileText size={compact ? 12 : 14} className={note ? 'text-amber-500' : 'text-sky-500'} />
+      <span className="font-bold font-mono">{sheet.key || (language === 'en' ? 'Sheet' : '樂譜')}</span>
+      {sheet.pageCount > 1 && <span className="opacity-60">{sheet.pageCount}p</span>}
+      {sheet.label && !compact && <span className="opacity-70 truncate max-w-[90px]">{sheet.label}</span>}
+      <FastTooltip text={note || (language === 'en' ? 'Open sheet music' : '開啟樂譜')} />
+    </a>
+  );
+};
+
+// --- 一首歌的樂譜群組：優先顯示符合本週調性的那份 ---
+const SheetGroup = ({ sheets, wantedKey, language, compact }) => {
+  const [expanded, setExpanded] = useState(false);
+  if (!sheets || sheets.length === 0) {
+    return <span className="text-[11px] text-slate-300 italic">{t('尚無樂譜', language)}</span>;
+  }
+  const best = pickSheetForKey(sheets, wantedKey);
+  const rest = sheets.filter(x => x.id !== best.id);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <SheetLink sheet={best} wantedKey={wantedKey} language={language} compact={compact} />
+      {rest.length > 0 && (expanded
+        ? rest.map(x => <SheetLink key={x.id} sheet={x} wantedKey={wantedKey} language={language} compact />)
+        : <button onClick={() => setExpanded(true)}
+            className="px-2 py-1 text-[11px] font-bold text-slate-400 hover:text-sky-600 bg-slate-50 hover:bg-sky-50 rounded-lg border border-slate-200 transition">
+            +{rest.length}
+          </button>)}
+    </div>
+  );
+};
+
 // -----------------------------------------------------------------------------
 // Main Application Component
 // -----------------------------------------------------------------------------
@@ -301,6 +421,7 @@ export default function App() {
   const [setlistsDb, setSetlistsDb] = useState([]);
   const [isDbReady, setIsDbReady] = useState(false);
   const [dbError, setDbError] = useState('');
+  const [sheetPool, setSheetPool] = useState([]);
 
   // --- View State ---
   const [view, setView] = useState('home'); 
@@ -419,7 +540,18 @@ export default function App() {
       setDbError('無法讀取雲端歌單，畫面上的內容可能不是最新的。');
     });
 
-    return () => { unsubSongs(); unsubSetlists(); };
+    // 3. Sync 待用樂譜庫（尚未關聯到任何歌曲的樂譜）
+    const poolRef = collection(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_sheet_pool');
+    const unsubPool = onSnapshot(poolRef, (snapshot) => {
+      const all = [];
+      snapshot.docs
+        .map(d => d.data())
+        .sort((a, b) => (a.index || 0) - (b.index || 0))
+        .forEach(part => (part.sheets || []).forEach(x => all.push(x)));
+      setSheetPool(all);
+    }, (err) => console.error("Firestore Sheet Pool Error:", err));
+
+    return () => { unsubSongs(); unsubSetlists(); unsubPool(); };
   }, [user]);
 
   // -----------------------------------------------------------------------------
@@ -886,6 +1018,141 @@ export default function App() {
     }
   };
 
+  // ---------------------------------------------------------------------------
+  // 樂譜管理
+  // ---------------------------------------------------------------------------
+  const [sheetBusy, setSheetBusy] = useState('');
+  const [sheetError, setSheetError] = useState('');
+  const [showPoolPicker, setShowPoolPicker] = useState(false);
+  const [poolSearch, setPoolSearch] = useState('');
+
+  // 待用池存成多份文件（每份 250 筆），改動時整批重寫
+  const writePool = async (list) => {
+    const CHUNK = 250;
+    const parts = Math.max(1, Math.ceil(list.length / CHUNK));
+    for (let i = 0; i < parts; i++) {
+      await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_sheet_pool', `part-${i}`), {
+        index: i,
+        sheets: list.slice(i * CHUNK, (i + 1) * CHUNK),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    // 清掉因為變短而多出來的舊分頁
+    const stale = Math.ceil(sheetPool.length / CHUNK);
+    for (let i = parts; i < stale; i++) {
+      await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_sheet_pool', `part-${i}`)).catch(() => {});
+    }
+  };
+
+  const saveSongSheets = async (songId, sheets) => {
+    const song = songsDb.find(x => x.id === songId);
+    if (!song) throw new Error('找不到歌曲');
+    await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', songId),
+                 { ...song, sheets }, { merge: true });
+  };
+
+  // 修改樂譜的調性／註記／名稱
+  const updateSheetMeta = async (songId, sheetId, patch) => {
+    setSheetBusy(sheetId); setSheetError('');
+    try {
+      const song = songsDb.find(x => x.id === songId);
+      await saveSongSheets(songId, (song.sheets || []).map(x => x.id === sheetId ? { ...x, ...patch } : x));
+    } catch (e) { setSheetError(String(e.message)); }
+    finally { setSheetBusy(''); }
+  };
+
+  // 從歌曲移除 -> 回到待用池（可還原）
+  const unlinkSheet = async (songId, sheetId) => {
+    setSheetBusy(sheetId); setSheetError('');
+    try {
+      const song = songsDb.find(x => x.id === songId);
+      const sheet = (song.sheets || []).find(x => x.id === sheetId);
+      await saveSongSheets(songId, (song.sheets || []).filter(x => x.id !== sheetId));
+      if (sheet && !sheetPool.some(x => x.id === sheetId)) {
+        await writePool([...sheetPool, sheet]);
+      }
+    } catch (e) { setSheetError(String(e.message)); }
+    finally { setSheetBusy(''); }
+  };
+
+  // 從待用池關聯到歌曲
+  const attachSheet = async (songId, sheet) => {
+    setSheetBusy(sheet.id); setSheetError('');
+    try {
+      const song = songsDb.find(x => x.id === songId);
+      const cur = song.sheets || [];
+      if (!cur.some(x => x.id === sheet.id)) await saveSongSheets(songId, [...cur, sheet]);
+      await writePool(sheetPool.filter(x => x.id !== sheet.id));
+      setShowPoolPicker(false); setPoolSearch('');
+    } catch (e) { setSheetError(String(e.message)); }
+    finally { setSheetBusy(''); }
+  };
+
+  // 上傳新樂譜：先向後端換取一次性上傳網址，再由瀏覽器直傳 R2
+  const [uploadingSheet, setUploadingSheet] = useState(false);
+  const [deleteSheetTarget, setDeleteSheetTarget] = useState(null);
+
+  const callSheetApi = async (payload) => {
+    const token = await firebaseAuth.currentUser?.getIdToken();
+    if (!token) throw new Error(t('請先登入主領帳號', language));
+    const r = await fetch('/api/sheet', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    return data;
+  };
+
+  const handleUploadSheet = async (file) => {
+    if (!file || !editingDbSongId) return;
+    setUploadingSheet(true); setSheetError('');
+    try {
+      const { uploadUrl, key, publicUrl } = await callSheetApi({
+        action: 'upload', contentType: file.type, size: file.size,
+      });
+      const put = await fetch(uploadUrl, {
+        method: 'PUT', body: file, headers: { 'Content-Type': file.type },
+      });
+      if (!put.ok) throw new Error(t('檔案上傳失敗，請再試一次。', language));
+
+      const song = songsDb.find(x => x.id === editingDbSongId);
+      const sheet = {
+        id: generateId(),
+        key: customKey || null,
+        label: null,
+        title: customTitle || song?.title || '',
+        url: publicUrl,
+        r2key: key,
+        pageCount: 1,
+        source: 'upload',
+        uploadedAt: new Date().toISOString(),
+      };
+      await saveSongSheets(editingDbSongId, [...(song?.sheets || []), sheet]);
+    } catch (e) {
+      setSheetError(String(e.message));
+    } finally {
+      setUploadingSheet(false);
+    }
+  };
+
+  // 永久刪除：連 R2 上的檔案一起移除，不可復原
+  const handleDeleteSheetForever = async (sheet) => {
+    setSheetBusy(sheet.id); setSheetError('');
+    try {
+      const r2key = sheet.r2key || (() => {
+        try { return new URL(sheet.url).pathname.replace(/^\//, ''); } catch { return null; }
+      })();
+      if (r2key) await callSheetApi({ action: 'delete', key: r2key });
+      const song = songsDb.find(x => x.id === editingDbSongId);
+      if (song) await saveSongSheets(editingDbSongId, (song.sheets || []).filter(x => x.id !== sheet.id));
+      await writePool(sheetPool.filter(x => x.id !== sheet.id));
+      setDeleteSheetTarget(null);
+    } catch (e) { setSheetError(String(e.message)); }
+    finally { setSheetBusy(''); }
+  };
+
   const executeDeleteDbSong = async (id) => { if (!user) return; await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', id)); setDeleteConfirmId(null); };
 
   // --- JSON Import Logic ---
@@ -1084,6 +1351,79 @@ export default function App() {
         </div>
       )}
 
+      {/* 待用樂譜庫挑選器 */}
+      {showPoolPicker && (() => {
+        const q = poolSearch.trim().toLowerCase();
+        const hits = (q ? sheetPool.filter(x =>
+          String(x.title || '').toLowerCase().includes(q) ||
+          String(x.label || '').toLowerCase().includes(q) ||
+          String(x.key || '').toLowerCase() === q
+        ) : sheetPool).slice(0, 100);
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+              <div className="flex justify-between items-center p-5 sm:p-6 pb-4 border-b border-slate-100 shrink-0">
+                <div>
+                  <h3 className="text-lg font-bold font-serif text-slate-900 flex items-center gap-2">
+                    <FileText size={20} className="text-[#C4A977]"/> {t('待用樂譜庫', language)}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">{sheetPool.length} {t('份尚未關聯的樂譜', language)}</p>
+                </div>
+                <button onClick={() => { setShowPoolPicker(false); setPoolSearch(''); }} className="text-slate-400 hover:text-slate-600"><X size={22}/></button>
+              </div>
+
+              <div className="p-5 sm:p-6 py-3 shrink-0 border-b border-slate-50">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4"/>
+                  <input type="text" value={poolSearch} onChange={e => setPoolSearch(e.target.value)} autoFocus
+                    placeholder={t('搜尋歌名、註記或調性...', language)}
+                    className="w-full pl-9 pr-4 py-2.5 border rounded-xl bg-slate-50 focus:bg-white focus:border-sky-500 outline-none transition text-sm"/>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-5 sm:p-6 pt-3">
+                {hits.length === 0 ? (
+                  <div className="text-center py-12 text-slate-400">
+                    <div className="text-3xl mb-2">🔍</div>
+                    <p className="text-sm">{t('待用庫查無符合的樂譜', language)}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {hits.map(sh => (
+                      <div key={sh.id} className="flex items-center gap-3 p-3 border border-slate-200 rounded-xl hover:border-sky-300 hover:bg-sky-50/40 transition">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-sm text-slate-800 truncate">{sh.title}</div>
+                          <div className="text-[11px] text-slate-500 font-mono mt-0.5">{sheetLabel(sh, language) || '—'}</div>
+                        </div>
+                        <a href={sh.url} target="_blank" rel="noopener noreferrer"
+                           className="relative group/tt shrink-0 p-2 text-slate-400 hover:text-sky-600 rounded-lg hover:bg-white transition">
+                          <Eye size={16}/><FastTooltip text={t('先看看內容', language)} position="left"/>
+                        </a>
+                        <button onClick={() => attachSheet(editingDbSongId, sh)} disabled={sheetBusy === sh.id}
+                          className="shrink-0 px-3 py-1.5 bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold rounded-lg shadow-sm transition disabled:opacity-50 flex items-center gap-1.5">
+                          {sheetBusy === sh.id ? <Loader2 size={14} className="animate-spin"/> : <Plus size={14}/>}
+                          {t('加入', language)}
+                        </button>
+                      </div>
+                    ))}
+                    {sheetPool.length > hits.length && !q && (
+                      <p className="text-center text-[11px] text-slate-400 pt-3">{t('僅顯示前 100 筆，請用搜尋縮小範圍', language)}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      <ConfirmModal isOpen={!!deleteSheetTarget}
+        title={t('永久刪除樂譜？', language)}
+        message={t('這會連雲端上的檔案一起刪除，無法復原。若只是想從這首歌拿掉，請改用旁邊的「移除」。', language)}
+        cancelText={t('取消', language)} confirmText={t('永久刪除', language)}
+        onCancel={() => setDeleteSheetTarget(null)}
+        onConfirm={() => handleDeleteSheetForever(deleteSheetTarget)} />
+
       {/* Coming Soon Modal */}
       {showComingSoonModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
@@ -1225,6 +1565,10 @@ export default function App() {
                           <button onClick={() => openPreviewFromHome(item)} className="w-full px-4 py-2 sm:py-2.5 bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex justify-center items-center gap-2">
                             <Eye size={16}/> {t('預覽', language)}
                           </button>
+                          <button onClick={() => { setCurrentSetlistId(item.id); setMeta({ date: item.date, wl: item.wl, youtubePlaylistUrl: item.youtubePlaylistUrl || '' }); setSetlist(item.songs || []); setView('sheets'); }}
+                            className="w-full px-4 py-2 sm:py-2.5 bg-white border border-slate-200 text-slate-600 text-xs sm:text-sm font-bold rounded-xl shadow-sm hover:border-sky-400 hover:text-sky-600 transition flex justify-center items-center gap-2">
+                            <FileText size={16} className="text-[#C4A977]"/> {t('樂手版', language)}
+                          </button>
                           <div className="flex items-center justify-between md:justify-end gap-2 w-full">
                             {item.youtubePlaylistUrl && (
                               <a href={item.youtubePlaylistUrl} target="_blank" rel="noopener noreferrer" className="relative group/tt flex-1 md:flex-none p-2 sm:p-2 bg-white border border-slate-200 text-red-500 rounded-xl hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition shadow-sm flex justify-center items-center">
@@ -1323,6 +1667,10 @@ export default function App() {
                       </div>
                       <div className="text-[11px] sm:text-[13px] text-blue-600 font-mono pl-8 sm:pl-9 font-bold tracking-wider overflow-x-auto custom-scrollbar pb-1">
                         {String(item.mapString || t('未設定段落', language))}
+                      </div>
+                      <div className="pl-8 sm:pl-9 mt-2">
+                        <SheetGroup sheets={songsDb.find(d => d.id === item.songId)?.sheets}
+                                    wantedKey={item.key} language={language} compact />
                       </div>
                     </div>
                     <div className="flex items-center justify-end gap-1.5 sm:gap-2 pt-2 sm:pt-0 border-t sm:border-0 border-slate-50 w-full sm:w-auto">
@@ -1511,6 +1859,79 @@ export default function App() {
               </div>
             </div>
 
+            {/* ---- 樂譜管理 ---- */}
+            {editingDbSongId && (() => {
+              const song = songsDb.find(x => x.id === editingDbSongId);
+              const mySheets = song?.sheets || [];
+              return (
+                <div className="mb-8 sm:mb-10">
+                  <div className="flex flex-wrap justify-between items-end border-b pb-2 mb-5 gap-2">
+                    <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest">
+                      <FileText size={14} className="text-[#C4A977]"/> {t('樂譜管理', language)}
+                      <span className="text-slate-300 normal-case tracking-normal font-medium">{mySheets.length} {t('份', language)}</span>
+                    </h3>
+                    <div className="flex gap-2">
+                      <label className={`text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer ${uploadingSheet ? 'bg-slate-100 text-slate-400' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
+                        {uploadingSheet ? <Loader2 size={14} className="animate-spin"/> : <Download size={14} className="rotate-180"/>}
+                        {uploadingSheet ? t('上傳中...', language) : t('上傳樂譜', language)}
+                        <input type="file" accept="application/pdf,image/jpeg,image/png" disabled={uploadingSheet}
+                          onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; handleUploadSheet(f); }}
+                          className="hidden"/>
+                      </label>
+                      <button onClick={() => { setShowPoolPicker(true); setPoolSearch(customTitle || ''); }}
+                        className="text-xs font-bold text-sky-600 bg-sky-50 hover:bg-sky-100 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+                        <Plus size={14}/> {t('從待用庫加入', language)}
+                      </button>
+                    </div>
+                  </div>
+
+                  {sheetError && <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-xs font-bold">{sheetError}</div>}
+
+                  {mySheets.length === 0 ? (
+                    <div className="text-center py-8 bg-slate-50 rounded-xl border border-slate-100">
+                      <FileText size={28} className="mx-auto mb-2 text-slate-300"/>
+                      <p className="text-xs text-slate-400">{t('這首歌還沒有樂譜', language)}</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {mySheets.map(sh => (
+                        <div key={sh.id} className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl hover:border-sky-200 transition">
+                          <a href={sh.url} target="_blank" rel="noopener noreferrer"
+                             className="shrink-0 flex items-center gap-2 px-3 py-2 bg-sky-50 text-sky-700 border border-sky-100 rounded-lg text-xs font-bold hover:bg-sky-100 transition">
+                            <FileText size={14}/> {t('檢視', language)}
+                            {sh.pageCount > 1 && <span className="opacity-60">{sh.pageCount}p</span>}
+                          </a>
+                          <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2 min-w-0">
+                            <input type="text" list="key-list" defaultValue={sh.key || ''} placeholder={t('調性', language)}
+                              onBlur={e => e.target.value !== (sh.key || '') && updateSheetMeta(editingDbSongId, sh.id, { key: e.target.value.trim() || null })}
+                              className="px-2 py-1.5 border rounded-lg text-sm font-mono bg-slate-50 focus:bg-white focus:border-sky-500 outline-none transition"/>
+                            <input type="text" defaultValue={sh.label || ''} placeholder={t('註記（女聲／吉他…）', language)}
+                              onBlur={e => e.target.value !== (sh.label || '') && updateSheetMeta(editingDbSongId, sh.id, { label: e.target.value.trim() || null })}
+                              className="px-2 py-1.5 border rounded-lg text-sm bg-slate-50 focus:bg-white focus:border-sky-500 outline-none transition sm:col-span-2"/>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <button onClick={() => unlinkSheet(editingDbSongId, sh.id)} disabled={sheetBusy === sh.id}
+                              className="relative group/tt p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition disabled:opacity-40">
+                              {sheetBusy === sh.id ? <Loader2 size={16} className="animate-spin"/> : <X size={16}/>}
+                              <FastTooltip text={t('從這首歌移除（回到待用庫，可還原）', language)} position="left"/>
+                            </button>
+                            <button onClick={() => setDeleteSheetTarget(sh)} disabled={sheetBusy === sh.id}
+                              className="relative group/tt p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-40">
+                              <Trash2 size={16}/>
+                              <FastTooltip text={t('永久刪除檔案（不可復原）', language)} position="left"/>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[11px] text-slate-400 mt-3 leading-relaxed">
+                    {t('調性與註記改完點擊別處即自動儲存。移除只是取消關聯，樂譜會回到待用庫，隨時能重新加入或改掛到別首歌。', language)}
+                  </p>
+                </div>
+              );
+            })()}
+
             <div className="mb-8 sm:mb-10">
               <div className="flex justify-between items-end border-b pb-2 mb-6 sm:mb-8"><h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest">{t('歌詞段落管理', language)}</h3></div>
               <div className="space-y-4 sm:space-y-6">
@@ -1644,6 +2065,78 @@ export default function App() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* 樂手版：依本週調性列出每首歌的樂譜 */}
+      {view === 'sheets' && (
+        <div className="pb-20 max-w-4xl mx-auto p-4 sm:p-8 pt-4 sm:pt-6 w-full">
+          <header className="mb-6 sm:mb-8 border-b border-slate-200 pb-4 sm:pb-6">
+            <button onClick={() => setView('home')} className="flex items-center gap-1 text-slate-500 hover:text-slate-900 transition font-medium text-sm mb-4"><ChevronLeft size={18}/> {t('返回首頁', language)}</button>
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 flex items-center gap-2.5">
+                  <FileText size={26} className="text-[#C4A977]"/> {t('樂手版', language)}
+                </h1>
+                <p className="text-slate-500 text-sm mt-1.5">{t('已依本週歌單的調性自動挑選樂譜', language)}</p>
+              </div>
+              <div className="text-left sm:text-right shrink-0">
+                <div className="font-mono font-bold text-sky-600 text-lg">{meta.date?.replace(/-/g, ' / ')}</div>
+                <div className="text-xs text-slate-500 flex items-center gap-1 sm:justify-end mt-0.5"><User size={12}/> {meta.wl || t('未指定', language)}</div>
+              </div>
+            </div>
+          </header>
+
+          <div className="space-y-3">
+            {setlist.map((item, idx) => {
+              const dbSong = songsDb.find(d => d.id === item.songId);
+              const sheets = dbSong?.sheets || [];
+              const best = pickSheetForKey(sheets, item.key);
+              const note = best ? keyMismatchNote(best, item.key, language) : null;
+              return (
+                <div key={item.id || idx} className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-sm">
+                  <div className="flex items-start gap-3 sm:gap-4">
+                    <span className="shrink-0 w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-serif font-bold text-sm mt-0.5">{idx + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-baseline gap-2 mb-1">
+                        <h3 className="font-serif font-bold text-base sm:text-lg text-slate-900">{item.title}</h3>
+                        <span className="font-mono text-xs font-bold text-sky-600 bg-sky-50 border border-sky-100 px-2 py-0.5 rounded">{item.key || 'C'}</span>
+                      </div>
+                      <div className="text-[11px] sm:text-xs text-blue-600 font-mono font-bold tracking-wider mb-3 overflow-x-auto custom-scrollbar">{item.mapString}</div>
+
+                      {sheets.length > 0 ? (
+                        <>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <a href={best.url} target="_blank" rel="noopener noreferrer"
+                               className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm shadow-sm transition
+                                 ${note ? 'bg-amber-50 border border-amber-300 text-amber-800 hover:border-amber-500'
+                                        : 'bg-sky-500 text-white hover:bg-sky-600 shadow-md'}`}>
+                              <FileText size={16}/>
+                              {t('開啟樂譜', language)}
+                              <span className="font-mono opacity-80">{best.key || ''}</span>
+                            </a>
+                            {sheets.filter(x => x.id !== best.id).map(x => (
+                              <SheetLink key={x.id} sheet={x} wantedKey={item.key} language={language} compact />
+                            ))}
+                          </div>
+                          {note && <p className="text-[11px] text-amber-700 font-bold mt-2 flex items-center gap-1">⚠️ {note}</p>}
+                        </>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic">{t('尚無樂譜', language)}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {meta.youtubePlaylistUrl && (
+            <a href={meta.youtubePlaylistUrl} target="_blank" rel="noopener noreferrer"
+               className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-red-600 hover:border-red-300 hover:bg-red-50 transition shadow-sm">
+              <Youtube size={18}/> {t('YouTube 播放清單', language)}
+            </a>
+          )}
         </div>
       )}
 

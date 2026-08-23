@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+tools/.venv
+tools/out/
+tools/.tmp/
+tools/scan.json
+tools/songs.json
+tools/uploaded.json
+tools/__pycache__/
+tools/match.json
