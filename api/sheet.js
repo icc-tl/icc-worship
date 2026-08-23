@@ -69,10 +69,18 @@ export default async function handler(req, res) {
         .map(b => b.toString(16).padStart(2, '0')).join('');
       const objectKey = `sheets/${rand()}/${rand().slice(0, 16)}.${ext}`;
 
+      // 物件路徑是隨機的（避免被猜到），所以要另外指定下載時顯示的檔名，
+      // 否則使用者存下來會看到一串雜湊。inline 讓瀏覽器直接預覽而非強制下載。
+      const safe = String(filename || 'sheet').replace(/[\\/:*?"<>|\x00-\x1f]/g, '').slice(0, 80) || 'sheet';
+      const withExt = safe.toLowerCase().endsWith(`.${ext}`) ? safe : `${safe}.${ext}`;
+      const asciiName = withExt.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '');
+      const disposition = `inline; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(withExt)}`;
+
       const url = await getSignedUrl(s3(), new PutObjectCommand({
         Bucket: bucket,
         Key: objectKey,
         ContentType: contentType,
+        ContentDisposition: disposition,
         CacheControl: 'public, max-age=31536000, immutable',
       }), { expiresIn: 300 });
 

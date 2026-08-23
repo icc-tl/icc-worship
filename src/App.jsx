@@ -22,6 +22,13 @@ const TRANSLATIONS = {
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
   "登出": "Sign Out",
+  "無": "None",
+  "先填好歌名後即可上傳樂譜，系統會自動先建立這首歌。": "Enter a song title first — uploading will create the song automatically.",
+  "請先輸入歌名再上傳樂譜": "Enter a song title before uploading a sheet",
+  "此裝置無法內嵌顯示，請點擊開啟": "This device cannot embed PDFs — tap to open",
+  "開新分頁": "New Tab",
+  "未標調性": "No key",
+  "可用樂譜": "Available Sheets",
   "檔案上傳失敗，請再試一次。": "Upload failed. Please try again.",
   "請先登入主領帳號": "Please sign in as a worship leader first",
   "永久刪除": "Delete Forever",
@@ -48,7 +55,6 @@ const TRANSLATIONS = {
   "樂譜管理": "Sheet Music",
   "尚無樂譜": "No sheet music",
   "樂譜": "Sheet Music",
-  "樂手版": "Musician View",
   "開啟樂譜": "Open Sheet",
   "已依本週歌單的調性自動挑選樂譜": "Sheets auto-selected to match this week\u2019s keys",
   "驗證中...": "Verifying...",
@@ -88,6 +94,8 @@ const TRANSLATIONS = {
   "未命名": "Untitled",
   "前往 YouTube 聆聽": "Listen on YouTube",
   "YouTube 聆聽": "Listen on YouTube",
+  "歌手預覽": "Singer View",
+  "樂手樂譜": "Musician Sheets",
   "預覽": "Preview",
   "YouTube 播放清單": "YouTube Playlist",
   "編輯": "Edit",
@@ -301,6 +309,28 @@ const keyMismatchNote = (sheet, wantedKey, language) => {
     : `此為 ${sheet.key} 調，本週為 ${wantedKey} 調`;
 };
 
+// 上傳的圖片盡量轉成 PDF，讓所有樂譜格式一致、也方便日後合併列印
+const imageFileToPdf = async (file) => {
+  const { jsPDF } = await import('jspdf');
+  const dataUrl = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file);
+  });
+  const img = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i); i.onerror = rej; i.src = dataUrl;
+  });
+  // 以圖片本身的比例決定紙張方向，避免留下大片空白
+  const orientation = img.width > img.height ? 'landscape' : 'portrait';
+  const pdf = new jsPDF({ orientation, unit: 'pt', format: 'letter' });
+  const pw = pdf.internal.pageSize.getWidth();
+  const ph = pdf.internal.pageSize.getHeight();
+  const scale = Math.min(pw / img.width, ph / img.height);
+  const w = img.width * scale, h = img.height * scale;
+  pdf.addImage(dataUrl, file.type === 'image/png' ? 'PNG' : 'JPEG', (pw - w) / 2, (ph - h) / 2, w, h);
+  return new File([pdf.output('blob')], (file.name.replace(/\.[^.]+$/, '') || 'sheet') + '.pdf', { type: 'application/pdf' });
+};
+
 const sheetLabel = (sheet, language) => {
   const bits = [];
   if (sheet.key) bits.push(sheet.key);
@@ -398,6 +428,49 @@ const SheetGroup = ({ sheets, wantedKey, language, compact }) => {
   );
 };
 
+// --- 調性配對的視覺標示 ---
+// 藍＝與本週調性相符 灰＝樂譜沒標調性 黃＝不同調性
+const sheetTone = (sheet, wantedKey) => {
+  const k = normalizeKey(sheet?.key);
+  const want = normalizeKey(wantedKey);
+  if (!k) return 'none';
+  if (!want || k === want) return k && want ? 'match' : 'none';
+  return k.split('-')[0] === want.split('-')[0] ? 'match' : 'diff';
+};
+
+const TONE_STYLES = {
+  match: { chip: 'bg-sky-500 text-white border-sky-500 shadow-sm', idle: 'bg-sky-50 text-sky-700 border-sky-200 hover:border-sky-400' },
+  none:  { chip: 'bg-slate-600 text-white border-slate-600 shadow-sm', idle: 'bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-400' },
+  diff:  { chip: 'bg-amber-500 text-white border-amber-500 shadow-sm', idle: 'bg-amber-50 text-amber-700 border-amber-300 hover:border-amber-500' },
+};
+
+// --- 內嵌樂譜檢視器：直接看，不強制下載 ---
+const SheetViewer = ({ sheet, language, height = '75vh' }) => {
+  if (!sheet) {
+    return (
+      <div className="flex flex-col items-center justify-center bg-slate-50 border border-dashed border-slate-200 rounded-xl text-slate-400" style={{ height }}>
+        <FileText size={36} className="mb-2 opacity-30" />
+        <p className="text-sm">{t('這首歌還沒有樂譜', language)}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="relative bg-slate-100 border border-slate-200 rounded-xl overflow-hidden shadow-inner" style={{ height }}>
+      <object data={`${sheet.url}#view=FitH`} type="application/pdf" className="w-full h-full">
+        {/* iPad／手機的 Safari 不一定能內嵌 PDF，退回明確的開啟按鈕 */}
+        <div className="flex flex-col items-center justify-center h-full gap-3 p-6 text-center">
+          <FileText size={36} className="text-slate-300" />
+          <p className="text-sm text-slate-500">{t('此裝置無法內嵌顯示，請點擊開啟', language)}</p>
+          <a href={sheet.url} target="_blank" rel="noopener noreferrer"
+             className="px-5 py-2.5 bg-sky-500 hover:bg-sky-600 text-white text-sm font-bold rounded-xl shadow-md transition">
+            {t('開啟樂譜', language)}
+          </a>
+        </div>
+      </object>
+    </div>
+  );
+};
+
 // -----------------------------------------------------------------------------
 // Main Application Component
 // -----------------------------------------------------------------------------
@@ -422,6 +495,8 @@ export default function App() {
   const [isDbReady, setIsDbReady] = useState(false);
   const [dbError, setDbError] = useState('');
   const [sheetPool, setSheetPool] = useState([]);
+  const [activeSheetSong, setActiveSheetSong] = useState(0);
+  const [activeSheetId, setActiveSheetId] = useState(null);
 
   // --- View State ---
   const [view, setView] = useState('home'); 
@@ -1091,6 +1166,7 @@ export default function App() {
   // 上傳新樂譜：先向後端換取一次性上傳網址，再由瀏覽器直傳 R2
   const [uploadingSheet, setUploadingSheet] = useState(false);
   const [deleteSheetTarget, setDeleteSheetTarget] = useState(null);
+  const [previewSheet, setPreviewSheet] = useState(null);
 
   const callSheetApi = async (payload) => {
     const token = await firebaseAuth.currentUser?.getIdToken();
@@ -1105,31 +1181,55 @@ export default function App() {
     return data;
   };
 
-  const handleUploadSheet = async (file) => {
-    if (!file || !editingDbSongId) return;
+  // 確保歌曲已存在於資料庫（新建立的歌先存檔才能掛樂譜）
+  const ensureSongSaved = async () => {
+    if (editingDbSongId) return editingDbSongId;
+    if (!customTitle.trim()) throw new Error(t('請先輸入歌名再上傳樂譜', language));
+    const sid = 'custom-' + Date.now();
+    const extractId = (url) => String(url || '').match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([^&?]{11})/)?.[1] || String(url || '');
+    const ns = {
+      id: sid, title: customTitle, artist: customArtist || 'Custom', defaultKey: customKey,
+      youtubeId: extractId(customYoutubeUrl) || '', hasMultitrack: customHasMultitrack,
+      lyrics: customLyrics.filter(l => l.section && String(l.section).trim() !== '')
+        .map(l => ({ section: String(l.section).trim().toUpperCase(), text: String(l.text || '').trim() })),
+      sheets: [],
+    };
+    await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', sid), ns);
+    setEditingDbSongId(sid);
+    return sid;
+  };
+
+  const handleUploadSheet = async (file, opts = {}) => {
+    if (!file) return;
     setUploadingSheet(true); setSheetError('');
     try {
+      const songId = opts.songId || await ensureSongSaved();
+      let payload = file;
+      if (file.type.startsWith('image/')) {
+        try { payload = await imageFileToPdf(file); }
+        catch { /* 轉檔失敗就照原檔上傳，不擋住使用者 */ }
+      }
+      const niceName = [opts.title || customTitle || '樂譜', opts.key || null, opts.label || null]
+        .filter(Boolean).join('_');
       const { uploadUrl, key, publicUrl } = await callSheetApi({
-        action: 'upload', contentType: file.type, size: file.size,
+        action: 'upload', contentType: payload.type, size: payload.size, filename: niceName,
       });
-      const put = await fetch(uploadUrl, {
-        method: 'PUT', body: file, headers: { 'Content-Type': file.type },
-      });
+      const put = await fetch(uploadUrl, { method: 'PUT', body: payload, headers: { 'Content-Type': payload.type } });
       if (!put.ok) throw new Error(t('檔案上傳失敗，請再試一次。', language));
 
-      const song = songsDb.find(x => x.id === editingDbSongId);
+      const fresh = songsDb.find(x => x.id === songId);
       const sheet = {
         id: generateId(),
-        key: customKey || null,
-        label: null,
-        title: customTitle || song?.title || '',
-        url: publicUrl,
-        r2key: key,
-        pageCount: 1,
-        source: 'upload',
-        uploadedAt: new Date().toISOString(),
+        key: opts.key ?? (customKey || null),
+        label: opts.label || null,
+        title: opts.title || customTitle || fresh?.title || '',
+        url: publicUrl, r2key: key, pageCount: 1,
+        source: 'upload', uploadedAt: new Date().toISOString(),
       };
-      await saveSongSheets(editingDbSongId, [...(song?.sheets || []), sheet]);
+      const song = songsDb.find(x => x.id === songId);
+      const cur = song?.sheets || [];
+      await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', songId),
+                   { ...(song || { id: songId }), sheets: [...cur, sheet] }, { merge: true });
     } catch (e) {
       setSheetError(String(e.message));
     } finally {
@@ -1424,6 +1524,30 @@ export default function App() {
         onCancel={() => setDeleteSheetTarget(null)}
         onConfirm={() => handleDeleteSheetForever(deleteSheetTarget)} />
 
+      {/* 樂譜快速預覽 */}
+      {previewSheet && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[210] flex items-center justify-center p-3 sm:p-6" onClick={() => setPreviewSheet(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-4xl h-[88vh] shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center px-5 py-3.5 border-b border-slate-100 shrink-0 gap-3">
+              <div className="min-w-0">
+                <h3 className="font-serif font-bold text-slate-900 truncate">{previewSheet.title}</h3>
+                <p className="text-[11px] text-slate-500 font-mono">{sheetLabel(previewSheet, language) || t('未標調性', language)}</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a href={previewSheet.url} target="_blank" rel="noopener noreferrer"
+                   className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-sky-600 border border-slate-200 hover:border-sky-300 rounded-lg transition flex items-center gap-1.5">
+                  <Eye size={13}/> {t('開新分頁', language)}
+                </a>
+                <button onClick={() => setPreviewSheet(null)} className="text-slate-400 hover:text-slate-600"><X size={22}/></button>
+              </div>
+            </div>
+            <div className="flex-1 p-3 sm:p-4 bg-slate-50 overflow-hidden">
+              <SheetViewer sheet={previewSheet} language={language} height="100%" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Coming Soon Modal */}
       {showComingSoonModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
@@ -1563,11 +1687,11 @@ export default function App() {
                         
                         <div className="flex flex-col gap-2 shrink-0 w-full md:w-[130px] pt-4 md:pt-0 mt-2 md:mt-0 border-t md:border-0 border-slate-50">
                           <button onClick={() => openPreviewFromHome(item)} className="w-full px-4 py-2 sm:py-2.5 bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex justify-center items-center gap-2">
-                            <Eye size={16}/> {t('預覽', language)}
+                            <Eye size={16}/> {t('歌手預覽', language)}
                           </button>
-                          <button onClick={() => { setCurrentSetlistId(item.id); setMeta({ date: item.date, wl: item.wl, youtubePlaylistUrl: item.youtubePlaylistUrl || '' }); setSetlist(item.songs || []); setView('sheets'); }}
-                            className="w-full px-4 py-2 sm:py-2.5 bg-white border border-slate-200 text-slate-600 text-xs sm:text-sm font-bold rounded-xl shadow-sm hover:border-sky-400 hover:text-sky-600 transition flex justify-center items-center gap-2">
-                            <FileText size={16} className="text-[#C4A977]"/> {t('樂手版', language)}
+                          <button onClick={() => { setCurrentSetlistId(item.id); setMeta({ date: item.date, wl: item.wl, youtubePlaylistUrl: item.youtubePlaylistUrl || '' }); setSetlist(item.songs || []); setActiveSheetSong(0); setActiveSheetId(null); setView('sheets'); }}
+                            className="w-full px-4 py-2 sm:py-2.5 bg-[#C4A977] hover:bg-[#B39866] text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition flex justify-center items-center gap-2">
+                            <FileText size={16}/> {t('樂手樂譜', language)}
                           </button>
                           <div className="flex items-center justify-between md:justify-end gap-2 w-full">
                             {item.youtubePlaylistUrl && (
@@ -1736,6 +1860,38 @@ export default function App() {
                     <a href={currentSong.youtubeId ? `https://youtu.be/${currentSong.youtubeId}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(currentSong.title)}`} target="_blank" rel="noopener noreferrer" className="flex-1 sm:flex-none justify-center px-3 sm:px-4 py-2 sm:py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 transition hover:bg-red-100"><Youtube size={16}/> {t('YouTube 聆聽', language)}</a>
                     <button onClick={() => requireAdmin(() => openManualEntry(currentSong, '', 'editor'))} className="flex-1 sm:flex-none justify-center px-3 sm:px-4 py-2 sm:py-2.5 bg-slate-50 border rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 transition hover:bg-slate-100 text-slate-700"><Database size={16} className="text-sky-500"/> {t('編輯詩歌檔案', language)}</button>
                   </div>
+                  {/* 這首歌的樂譜：主領編歌單時就能確認樂手有沒有譜 */}
+                  <div className="mb-6">
+                    <div className="flex flex-wrap justify-between items-center border-b pb-2 mb-3 gap-2">
+                      <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                        <FileText size={13} className="text-[#C4A977]"/> {t('樂譜', language)}
+                        <span className="text-slate-300 normal-case tracking-normal">{(currentSong.sheets || []).length}</span>
+                      </h3>
+                      <label className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 cursor-pointer ${uploadingSheet ? 'bg-slate-100 text-slate-400' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
+                        {uploadingSheet ? <Loader2 size={12} className="animate-spin"/> : <Download size={12} className="rotate-180"/>}
+                        {uploadingSheet ? t('上傳中...', language) : t('上傳樂譜', language)}
+                        <input type="file" accept="application/pdf,image/jpeg,image/png" disabled={uploadingSheet} className="hidden"
+                          onChange={e => { const f = e.target.files?.[0]; e.target.value = '';
+                            handleUploadSheet(f, { songId: currentSong.id, key: currentKey, title: currentSong.title }); }}/>
+                      </label>
+                    </div>
+                    {sheetError && <p className="text-[11px] text-red-600 font-bold mb-2">{sheetError}</p>}
+                    <div className="flex flex-wrap gap-1.5">
+                      {(currentSong.sheets || []).length === 0
+                        ? <span className="text-[11px] text-slate-400 italic">{t('這首歌還沒有樂譜', language)}</span>
+                        : (currentSong.sheets || []).map(sh => {
+                            const tone = sheetTone(sh, currentKey);
+                            return (
+                              <button key={sh.id} onClick={() => setPreviewSheet(sh)}
+                                className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition flex items-center gap-1.5 ${TONE_STYLES[tone].idle}`}>
+                                <FileText size={11}/>
+                                <span className="font-mono">{sh.key || t('未標調性', language)}</span>
+                                {sh.pageCount > 1 && <span className="opacity-60 font-normal">{sh.pageCount}p</span>}
+                              </button>
+                            );
+                          })}
+                    </div>
+                  </div>
                   <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 mb-3 sm:mb-4 border-b pb-2 uppercase tracking-widest">{t('歌詞預覽', language)}</h3>
                   <div className="space-y-4 sm:space-y-6 max-h-[350px] sm:max-h-[450px] overflow-y-auto pr-2 custom-scrollbar">
                     {currentSong.lyrics?.map((s, i) => (<div key={i} className="mb-3 sm:mb-4"><span onClick={() => handleAppendTag(s.section)} className="relative group/tt inline-block px-1.5 sm:px-2 py-0.5 bg-slate-100 text-slate-700 font-mono text-[9px] sm:text-[10px] font-bold rounded shadow-sm cursor-pointer hover:bg-sky-500 hover:text-white transition mb-1.5 sm:mb-2">{String(s.section||'')} <FastTooltip text={getTagExplanation(s.section, language)} /></span><p className="text-xs sm:text-[14px] text-slate-700 leading-relaxed whitespace-pre-wrap">{String(s.text||'')}</p></div>))}
@@ -1860,7 +2016,7 @@ export default function App() {
             </div>
 
             {/* ---- 樂譜管理 ---- */}
-            {editingDbSongId && (() => {
+            {(() => {
               const song = songsDb.find(x => x.id === editingDbSongId);
               const mySheets = song?.sheets || [];
               return (
@@ -1887,6 +2043,11 @@ export default function App() {
 
                   {sheetError && <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-xs font-bold">{sheetError}</div>}
 
+                  {!editingDbSongId && (
+                    <p className="mb-3 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                      {t('先填好歌名後即可上傳樂譜，系統會自動先建立這首歌。', language)}
+                    </p>
+                  )}
                   {mySheets.length === 0 ? (
                     <div className="text-center py-8 bg-slate-50 rounded-xl border border-slate-100">
                       <FileText size={28} className="mx-auto mb-2 text-slate-300"/>
@@ -1896,11 +2057,11 @@ export default function App() {
                     <div className="space-y-2.5">
                       {mySheets.map(sh => (
                         <div key={sh.id} className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl hover:border-sky-200 transition">
-                          <a href={sh.url} target="_blank" rel="noopener noreferrer"
+                          <button onClick={() => setPreviewSheet(sh)}
                              className="shrink-0 flex items-center gap-2 px-3 py-2 bg-sky-50 text-sky-700 border border-sky-100 rounded-lg text-xs font-bold hover:bg-sky-100 transition">
-                            <FileText size={14}/> {t('檢視', language)}
+                            <Eye size={14}/> {t('檢視', language)}
                             {sh.pageCount > 1 && <span className="opacity-60">{sh.pageCount}p</span>}
-                          </a>
+                          </button>
                           <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2 min-w-0">
                             <input type="text" list="key-list" defaultValue={sh.key || ''} placeholder={t('調性', language)}
                               onBlur={e => e.target.value !== (sh.key || '') && updateSheetMeta(editingDbSongId, sh.id, { key: e.target.value.trim() || null })}
@@ -2000,6 +2161,7 @@ export default function App() {
                   <th className="p-3 sm:p-4">{t('歌名 (Song Title)', language)}</th>
                   <th className="p-3 sm:p-4">{t('歌手 / 出處', language)}</th>
                   <th className="p-3 sm:p-4">{t('近期熱度', language)}</th>
+                  <th className="p-3 sm:p-4">{t('樂譜', language)}</th>
                   <th className="p-3 sm:p-4">{t('預設調性', language)}</th>
                   <th className="p-3 sm:p-4 text-center" title="Multitrack">Multitrack</th>
                   <th className="p-3 sm:p-4 text-right">{t('管理操作', language)}</th>
@@ -2039,6 +2201,21 @@ export default function App() {
                         )}
                       </div>
                     </td>
+                    <td className="p-3 sm:p-4">
+                      {(s.sheets || []).length === 0 ? (
+                        <span className="text-[10px] text-slate-300 italic">{t('無', language)}</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1 items-center max-w-[190px]">
+                          {(s.sheets || []).slice(0, 5).map(sh => (
+                            <span key={sh.id}
+                              className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-bold border ${sh.key ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                              {sh.key || '—'}
+                            </span>
+                          ))}
+                          {(s.sheets || []).length > 5 && <span className="text-[10px] text-slate-400 font-bold">+{(s.sheets || []).length - 5}</span>}
+                        </div>
+                      )}
+                    </td>
                     <td className="p-3 sm:p-4 font-mono text-xs sm:text-sm text-slate-400">
                       <div className="flex flex-col items-start gap-1.5">
                         <span className="bg-sky-50 text-sky-600 px-2 py-0.5 rounded border border-sky-100 font-bold">{s.defaultKey}</span>
@@ -2069,76 +2246,98 @@ export default function App() {
       )}
 
       {/* 樂手版：依本週調性列出每首歌的樂譜 */}
-      {view === 'sheets' && (
-        <div className="pb-20 max-w-4xl mx-auto p-4 sm:p-8 pt-4 sm:pt-6 w-full">
-          <header className="mb-6 sm:mb-8 border-b border-slate-200 pb-4 sm:pb-6">
-            <button onClick={() => setView('home')} className="flex items-center gap-1 text-slate-500 hover:text-slate-900 transition font-medium text-sm mb-4"><ChevronLeft size={18}/> {t('返回首頁', language)}</button>
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 flex items-center gap-2.5">
-                  <FileText size={26} className="text-[#C4A977]"/> {t('樂手版', language)}
+      {/* 樂手樂譜：上方是完整 song map，下方直接內嵌預覽，分頁切換歌曲 */}
+      {view === 'sheets' && (() => {
+        const active = setlist[activeSheetSong] || setlist[0];
+        const dbSong = active ? songsDb.find(d => d.id === active.songId) : null;
+        const sheets = dbSong?.sheets || [];
+        const chosen = sheets.find(x => x.id === activeSheetId) || pickSheetForKey(sheets, active?.key);
+        return (
+          <div className="pb-16 max-w-6xl mx-auto p-4 sm:p-6 pt-4 w-full">
+            <header className="mb-5 border-b border-slate-200 pb-4">
+              <button onClick={() => setView('home')} className="flex items-center gap-1 text-slate-500 hover:text-slate-900 transition font-medium text-sm mb-3"><ChevronLeft size={18}/> {t('返回首頁', language)}</button>
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+                <h1 className="text-xl sm:text-2xl font-serif font-bold text-slate-900 flex items-center gap-2.5">
+                  <FileText size={24} className="text-[#C4A977]"/> {t('樂手樂譜', language)}
                 </h1>
-                <p className="text-slate-500 text-sm mt-1.5">{t('已依本週歌單的調性自動挑選樂譜', language)}</p>
+                <div className="text-left sm:text-right shrink-0">
+                  <div className="font-mono font-bold text-sky-600">{meta.date?.replace(/-/g, ' / ')}</div>
+                  <div className="text-xs text-slate-500 flex items-center gap-1 sm:justify-end mt-0.5"><User size={12}/> {meta.wl || t('未指定', language)}</div>
+                </div>
               </div>
-              <div className="text-left sm:text-right shrink-0">
-                <div className="font-mono font-bold text-sky-600 text-lg">{meta.date?.replace(/-/g, ' / ')}</div>
-                <div className="text-xs text-slate-500 flex items-center gap-1 sm:justify-end mt-0.5"><User size={12}/> {meta.wl || t('未指定', language)}</div>
+            </header>
+
+            {/* 完整 Song Map —— 與歌手看到的相同 */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4 mb-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
+                {setlist.map((item, idx) => (
+                  <button key={item.id || idx} onClick={() => { setActiveSheetSong(idx); setActiveSheetId(null); }}
+                    className={`text-left flex gap-2.5 items-start p-2 rounded-lg transition ${idx === activeSheetSong ? 'bg-white shadow-sm border border-sky-200' : 'hover:bg-white/70 border border-transparent'}`}>
+                    <span className={`shrink-0 w-5 h-5 rounded flex items-center justify-center font-bold font-serif text-[10px] mt-0.5 ${idx === activeSheetSong ? 'bg-sky-500 text-white' : 'bg-slate-900 text-white'}`}>{idx + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-serif font-bold text-[13px] text-slate-900">{item.title}</span>
+                        <span className="font-mono text-[9px] font-bold text-sky-600 bg-sky-100/80 border border-sky-200 px-1 py-px rounded">{item.key}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono tracking-wide truncate">{item.mapString}</div>
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
-          </header>
 
-          <div className="space-y-3">
-            {setlist.map((item, idx) => {
-              const dbSong = songsDb.find(d => d.id === item.songId);
-              const sheets = dbSong?.sheets || [];
-              const best = pickSheetForKey(sheets, item.key);
-              const note = best ? keyMismatchNote(best, item.key, language) : null;
-              return (
-                <div key={item.id || idx} className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-sm">
-                  <div className="flex items-start gap-3 sm:gap-4">
-                    <span className="shrink-0 w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-serif font-bold text-sm mt-0.5">{idx + 1}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-baseline gap-2 mb-1">
-                        <h3 className="font-serif font-bold text-base sm:text-lg text-slate-900">{item.title}</h3>
-                        <span className="font-mono text-xs font-bold text-sky-600 bg-sky-50 border border-sky-100 px-2 py-0.5 rounded">{item.key || 'C'}</span>
-                      </div>
-                      <div className="text-[11px] sm:text-xs text-blue-600 font-mono font-bold tracking-wider mb-3 overflow-x-auto custom-scrollbar">{item.mapString}</div>
+            {/* 歌曲分頁 */}
+            <div className="flex gap-1.5 overflow-x-auto custom-scrollbar pb-2 mb-3">
+              {setlist.map((item, idx) => {
+                const sc = (songsDb.find(d => d.id === item.songId)?.sheets || []).length;
+                return (
+                  <button key={item.id || idx} onClick={() => { setActiveSheetSong(idx); setActiveSheetId(null); }}
+                    className={`shrink-0 px-3 py-2 rounded-lg text-xs font-bold transition border flex items-center gap-1.5 ${idx === activeSheetSong ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
+                    <span className="opacity-60">{idx + 1}.</span>
+                    <span className="max-w-[130px] truncate">{item.title}</span>
+                    {sc === 0 && <span className="text-[9px] opacity-50">✕</span>}
+                  </button>
+                );
+              })}
+            </div>
 
-                      {sheets.length > 0 ? (
-                        <>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <a href={best.url} target="_blank" rel="noopener noreferrer"
-                               className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm shadow-sm transition
-                                 ${note ? 'bg-amber-50 border border-amber-300 text-amber-800 hover:border-amber-500'
-                                        : 'bg-sky-500 text-white hover:bg-sky-600 shadow-md'}`}>
-                              <FileText size={16}/>
-                              {t('開啟樂譜', language)}
-                              <span className="font-mono opacity-80">{best.key || ''}</span>
-                            </a>
-                            {sheets.filter(x => x.id !== best.id).map(x => (
-                              <SheetLink key={x.id} sheet={x} wantedKey={item.key} language={language} compact />
-                            ))}
-                          </div>
-                          {note && <p className="text-[11px] text-amber-700 font-bold mt-2 flex items-center gap-1">⚠️ {note}</p>}
-                        </>
-                      ) : (
-                        <span className="text-xs text-slate-400 italic">{t('尚無樂譜', language)}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {/* 樂譜選擇：藍＝調性相符 灰＝未標調性 黃＝不同調性 */}
+            {active && (
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mr-1">{t('可用樂譜', language)}</span>
+                {sheets.length === 0 && <span className="text-xs text-slate-400 italic">{t('這首歌還沒有樂譜', language)}</span>}
+                {sheets.map(sh => {
+                  const tone = sheetTone(sh, active.key);
+                  const on = chosen?.id === sh.id;
+                  return (
+                    <button key={sh.id} onClick={() => setActiveSheetId(sh.id)}
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition flex items-center gap-1.5 ${on ? TONE_STYLES[tone].chip : TONE_STYLES[tone].idle}`}>
+                      <span className="font-mono">{sh.key || t('未標調性', language)}</span>
+                      {sh.pageCount > 1 && <span className="opacity-70 font-normal">{sh.pageCount}p</span>}
+                      {sh.label && <span className="opacity-70 font-normal max-w-[80px] truncate">{sh.label}</span>}
+                    </button>
+                  );
+                })}
+                {chosen && (
+                  <a href={chosen.url} target="_blank" rel="noopener noreferrer"
+                     className="ml-auto px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-500 hover:text-sky-600 hover:border-sky-300 transition flex items-center gap-1.5">
+                    <Eye size={13}/> {t('開新分頁', language)}
+                  </a>
+                )}
+              </div>
+            )}
+
+            {chosen && sheetTone(chosen, active?.key) === 'diff' && (
+              <p className="text-[11px] text-amber-700 font-bold mb-2 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                ⚠️ {keyMismatchNote(chosen, active.key, language)}
+              </p>
+            )}
+
+            <SheetViewer sheet={chosen} language={language} />
           </div>
+        );
+      })()}
 
-          {meta.youtubePlaylistUrl && (
-            <a href={meta.youtubePlaylistUrl} target="_blank" rel="noopener noreferrer"
-               className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-red-600 hover:border-red-300 hover:bg-red-50 transition shadow-sm">
-              <Youtube size={18}/> {t('YouTube 播放清單', language)}
-            </a>
-          )}
-        </div>
-      )}
 
       {view === 'preview' && (
         <div className="min-h-screen flex flex-col bg-slate-200">
