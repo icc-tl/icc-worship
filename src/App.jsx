@@ -22,6 +22,12 @@ const TRANSLATIONS = {
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
   "登出": "Sign Out",
+  "已合併，但這些歌沒有可用樂譜：": "Merged, but these songs had no sheet: ",
+  "沒有可合併的樂譜": "No sheets available to merge",
+  "合併中...": "Merging...",
+  "整份下載": "Download All",
+  "歷史歌單": "Old setlist",
+  "檔名無歌名": "No title in filename",
   "改用新分頁開啟": "Open in a new tab",
   "樂譜載入失敗": "Could not load the sheet",
   "樂譜載入中...": "Loading sheet...",
@@ -334,6 +340,18 @@ const imageFileToPdf = async (file) => {
   return new File([pdf.output('blob')], (file.name.replace(/\.[^.]+$/, '') || 'sheet') + '.pdf', { type: 'application/pdf' });
 };
 
+// 有些樂譜是直接從相機或截圖存下來的，檔名（IMG_4525、Photo Apr 20…）
+// 完全看不出是哪首歌。這種排到清單最後，並標示出來提醒需要開啟確認。
+const UNNAMED_RE = /^(img[_-]?\d|photo\s|screen\s*shot|screenshot|untitled|scan\b|document\b)/i;
+const SETLIST_DOC_RE = /song\s*map|worship\s*set/i;
+
+const poolRank = (sheet) => {
+  const t = String(sheet.title || '');
+  if (SETLIST_DOC_RE.test(t)) return 2;   // 歷史歌單文件，不是樂譜
+  if (UNNAMED_RE.test(t)) return 1;       // 檔名看不出歌名
+  return 0;
+};
+
 const sheetLabel = (sheet, language) => {
   const bits = [];
   if (sheet.key) bits.push(sheet.key);
@@ -455,12 +473,33 @@ let pdfLibPromise = null;
 const loadPdfLib = () => {
   if (!pdfLibPromise) {
     pdfLibPromise = import('pdfjs-dist').then(async (lib) => {
-      const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
-      lib.GlobalWorkerOptions.workerSrc = worker.default;
+      try {
+        // PDF.js 用的是 module worker，Safari 16.4 以前不支援。
+        // 設定失敗就不指定 worker，PDF.js 會自動退回主執行緒執行 —— 慢一些但能動。
+        const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+        lib.GlobalWorkerOptions.workerSrc = worker.default;
+      } catch {
+        lib.GlobalWorkerOptions.workerSrc = '';
+      }
       return lib;
     });
   }
   return pdfLibPromise;
+};
+
+// iOS Safari／iPad Chrome（同為 WebKit）對 canvas 有硬性上限：
+// 單邊約 4096px、總面積約 16M 像素。超過不會報錯，而是靜靜畫出一片空白。
+const CANVAS_MAX_SIDE = 4096;
+const CANVAS_MAX_AREA = 16 * 1024 * 1024;
+
+const safeScale = (baseW, baseH, wanted) => {
+  const cap = Math.min(
+    CANVAS_MAX_SIDE / (baseW * wanted),
+    CANVAS_MAX_SIDE / (baseH * wanted),
+    Math.sqrt(CANVAS_MAX_AREA / (baseW * wanted * baseH * wanted)),
+    1
+  );
+  return wanted * cap;
 };
 
 const SheetViewer = ({ sheet, language, height = '75vh' }) => {
@@ -521,18 +560,48 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
       const canvas = canvasRef.current;
       const avail = (wrapRef.current?.clientWidth || 800) - 24;
       const base = page.getViewport({ scale: 1 });
-      const scale = (avail / base.width) * zoom;
-      // 高解析螢幕要乘上 devicePixelRatio，否則譜會糊
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const viewport = page.getViewport({ scale: scale * dpr });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      canvas.style.width = `${viewport.width / dpr}px`;
-      canvas.style.height = `${viewport.height / dpr}px`;
+      const cssScale = (avail / base.width) * zoom;
 
-      const task = page.render({ canvasContext: canvas.getContext('2d'), viewport });
+      // iOS Safari 對 canvas 有硬性上限：單邊約 4096px、總面積約 16M 像素。
+      // 超過不會報錯，而是整片空白 —— 這正是 iPad 上看不到樂譜的原因。
+      // 先用 devicePixelRatio 求清晰度，再依上限往下壓。
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const drawScale = safeScale(base.width, base.height, cssScale * dpr);
+
+      const viewport = page.getViewport({ scale: drawScale });
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      // 顯示尺寸固定依 CSS 比例，與實際繪製解析度脫鉤
+      canvas.style.width = `${Math.round(base.width * cssScale)}px`;
+      canvas.style.height = `${Math.round(base.height * cssScale)}px`;
+
+      const ctx = canvas.getContext('2d');
+      const task = page.render({ canvasContext: ctx, viewport });
       renderTaskRef.current = task;
-      try { await task.promise; } catch { /* 換頁時被取消，忽略 */ }
+      try { await task.promise; } catch { return; /* 換頁時被取消 */ }
+      if (cancelled) return;
+
+      // iOS 在 canvas 過大時不會報錯，而是靜靜地畫出一片空白。
+      // 抽樣檢查，真的空白就用更小的尺寸重畫一次。
+      const blank = (() => {
+        try {
+          const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          for (let i = 0; i < d.length; i += 4000) if (d[i] < 245) return false;
+          return true;
+        } catch { return false; }   // 跨來源污染等情況無法檢查，當作正常
+      })();
+
+      if (blank && drawScale > cssScale * 0.4) {
+        // 退路同樣要壓在上限內，否則等於繞過保護
+        const smaller = page.getViewport({ scale: safeScale(base.width, base.height, cssScale * 0.6) });
+        canvas.width = Math.floor(smaller.width);
+        canvas.height = Math.floor(smaller.height);
+        const t2 = page.render({ canvasContext: canvas.getContext('2d'), viewport: smaller });
+        renderTaskRef.current = t2;
+        try { await t2.promise; } catch { /* 忽略 */ }
+      } else if (blank) {
+        if (!cancelled) setStatus('error');
+      }
     })();
 
     return () => { cancelled = true; };
@@ -623,6 +692,9 @@ export default function App() {
   const [sheetPool, setSheetPool] = useState([]);
   const [activeSheetSong, setActiveSheetSong] = useState(0);
   const [activeSheetId, setActiveSheetId] = useState(null);
+  const [showSongMap, setShowSongMap] = useState(false);
+  const [mergingPdf, setMergingPdf] = useState(false);
+  const [mergeError, setMergeError] = useState('');
 
   // --- View State ---
   const [view, setView] = useState('home'); 
@@ -1379,6 +1451,52 @@ export default function App() {
     finally { setSheetBusy(''); }
   };
 
+  // 把整份歌單的樂譜合成一份 PDF：可直接印、丟平板，也是主日早上的離線備援。
+  // 在瀏覽器端合併，避免把 190MB 的流量繞經伺服器。
+  const handleMergeSetlistPdf = async () => {
+    if (mergingPdf || setlist.length === 0) return;
+    setMergingPdf(true); setMergeError('');
+    try {
+      const { PDFDocument } = await import('pdf-lib');
+      const out = await PDFDocument.create();
+      const missing = [];
+
+      for (const item of setlist) {
+        const dbSong = songsDb.find(d => d.id === item.songId);
+        const sheet = pickSheetForKey(dbSong?.sheets, item.key);
+        if (!sheet) { missing.push(item.title); continue; }
+        try {
+          let res = await fetch(sheet.url);
+          if (!res.ok) throw new Error(String(res.status));
+          const bytes = await res.arrayBuffer();
+          const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+          const pages = await out.copyPages(src, src.getPageIndices());
+          pages.forEach(pg => out.addPage(pg));
+        } catch {
+          missing.push(item.title);
+        }
+      }
+
+      if (out.getPageCount() === 0) throw new Error(t('沒有可合併的樂譜', language));
+
+      const blob = new Blob([await out.save()], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ICC_${(meta.date || '').replace(/-/g, '')}_樂譜.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+      if (missing.length) {
+        setMergeError(t('已合併，但這些歌沒有可用樂譜：', language) + missing.join('、'));
+      }
+    } catch (e) {
+      setMergeError(String(e.message));
+    } finally {
+      setMergingPdf(false);
+    }
+  };
+
   const executeDeleteDbSong = async (id) => { if (!user) return; await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', id)); setDeleteConfirmId(null); };
 
   // --- JSON Import Logic ---
@@ -1580,11 +1698,15 @@ export default function App() {
       {/* 待用樂譜庫挑選器 */}
       {showPoolPicker && (() => {
         const q = poolSearch.trim().toLowerCase();
-        const hits = (q ? sheetPool.filter(x =>
+        const matched = q ? sheetPool.filter(x =>
           String(x.title || '').toLowerCase().includes(q) ||
           String(x.label || '').toLowerCase().includes(q) ||
           String(x.key || '').toLowerCase() === q
-        ) : sheetPool).slice(0, 100);
+        ) : sheetPool;
+        // 看得出歌名的排前面，相機檔名與歷史歌單文件沉到最後
+        const hits = [...matched].sort((a, b) =>
+          poolRank(a) - poolRank(b) || String(a.title || '').localeCompare(String(b.title || ''))
+        ).slice(0, 100);
         return (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
@@ -1618,7 +1740,15 @@ export default function App() {
                     {hits.map(sh => (
                       <div key={sh.id} className="flex items-center gap-3 p-3 border border-slate-200 rounded-xl hover:border-sky-300 hover:bg-sky-50/40 transition">
                         <div className="flex-1 min-w-0">
-                          <div className="font-bold text-sm text-slate-800 truncate">{sh.title}</div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-sm text-slate-800 truncate">{sh.title}</span>
+                            {poolRank(sh) === 1 && (
+                              <span className="shrink-0 text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-px rounded">{t('檔名無歌名', language)}</span>
+                            )}
+                            {poolRank(sh) === 2 && (
+                              <span className="shrink-0 text-[9px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-px rounded">{t('歷史歌單', language)}</span>
+                            )}
+                          </div>
                           <div className="text-[11px] text-slate-500 font-mono mt-0.5">{sheetLabel(sh, language) || '—'}</div>
                         </div>
                         <a href={sh.url} target="_blank" rel="noopener noreferrer"
@@ -2373,93 +2503,115 @@ export default function App() {
 
       {/* 樂手版：依本週調性列出每首歌的樂譜 */}
       {/* 樂手樂譜：上方是完整 song map，下方直接內嵌預覽，分頁切換歌曲 */}
+      {/* 樂手樂譜：整頁固定高度，樂譜區佔滿剩餘空間，不需要捲整頁 */}
       {view === 'sheets' && (() => {
         const active = setlist[activeSheetSong] || setlist[0];
         const dbSong = active ? songsDb.find(d => d.id === active.songId) : null;
         const sheets = dbSong?.sheets || [];
         const chosen = sheets.find(x => x.id === activeSheetId) || pickSheetForKey(sheets, active?.key);
         return (
-          <div className="pb-16 max-w-6xl mx-auto p-4 sm:p-6 pt-4 w-full">
-            <header className="mb-5 border-b border-slate-200 pb-4">
-              <button onClick={() => setView('home')} className="flex items-center gap-1 text-slate-500 hover:text-slate-900 transition font-medium text-sm mb-3"><ChevronLeft size={18}/> {t('返回首頁', language)}</button>
-              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-                <h1 className="text-xl sm:text-2xl font-serif font-bold text-slate-900 flex items-center gap-2.5">
-                  <FileText size={24} className="text-[#C4A977]"/> {t('樂手樂譜', language)}
-                </h1>
-                <div className="text-left sm:text-right shrink-0">
-                  <div className="font-mono font-bold text-sky-600">{meta.date?.replace(/-/g, ' / ')}</div>
-                  <div className="text-xs text-slate-500 flex items-center gap-1 sm:justify-end mt-0.5"><User size={12}/> {meta.wl || t('未指定', language)}</div>
+          <div className="fixed inset-0 top-0 flex flex-col bg-[#FAFAFA] z-[60] overflow-hidden">
+            {/* 頂列 */}
+            <div className="shrink-0 bg-white border-b border-slate-200 px-3 sm:px-5 py-2.5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <button onClick={() => setView('home')} className="flex items-center gap-1 text-slate-500 hover:text-slate-900 transition font-medium text-sm shrink-0">
+                  <ChevronLeft size={18}/> <span className="hidden sm:inline">{t('返回首頁', language)}</span>
+                </button>
+                <span className="w-px h-5 bg-slate-200 mx-1 hidden sm:block"></span>
+                <FileText size={18} className="text-[#C4A977] shrink-0"/>
+                <span className="font-serif font-bold text-slate-900 text-sm sm:text-base truncate">{t('樂手樂譜', language)}</span>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <div className="text-right hidden sm:block">
+                  <div className="font-mono font-bold text-sky-600 text-xs leading-tight">{meta.date?.replace(/-/g, ' / ')}</div>
+                  <div className="text-[10px] text-slate-500 flex items-center gap-1 justify-end"><User size={10}/> {meta.wl || t('未指定', language)}</div>
                 </div>
-              </div>
-            </header>
-
-            {/* 完整 Song Map —— 與歌手看到的相同 */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4 mb-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
-                {setlist.map((item, idx) => (
-                  <button key={item.id || idx} onClick={() => { setActiveSheetSong(idx); setActiveSheetId(null); }}
-                    className={`text-left flex gap-2.5 items-start p-2 rounded-lg transition ${idx === activeSheetSong ? 'bg-white shadow-sm border border-sky-200' : 'hover:bg-white/70 border border-transparent'}`}>
-                    <span className={`shrink-0 w-5 h-5 rounded flex items-center justify-center font-bold font-serif text-[10px] mt-0.5 ${idx === activeSheetSong ? 'bg-sky-500 text-white' : 'bg-slate-900 text-white'}`}>{idx + 1}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-serif font-bold text-[13px] text-slate-900">{item.title}</span>
-                        <span className="font-mono text-[9px] font-bold text-sky-600 bg-sky-100/80 border border-sky-200 px-1 py-px rounded">{item.key}</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-mono tracking-wide truncate">{item.mapString}</div>
-                    </div>
-                  </button>
-                ))}
+                <button onClick={() => setShowSongMap(v => !v)}
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition flex items-center gap-1.5 ${showSongMap ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
+                  <ListMusic size={13}/> <span className="hidden sm:inline">Song Map</span>
+                </button>
+                <button onClick={handleMergeSetlistPdf} disabled={mergingPdf}
+                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-[#C4A977] hover:bg-[#B39866] text-white shadow-sm transition flex items-center gap-1.5 disabled:opacity-50">
+                  {mergingPdf ? <Loader2 size={13} className="animate-spin"/> : <Download size={13}/>}
+                  <span className="hidden sm:inline">{mergingPdf ? t('合併中...', language) : t('整份下載', language)}</span>
+                </button>
               </div>
             </div>
 
-            {/* 歌曲分頁 */}
-            <div className="flex gap-1.5 overflow-x-auto custom-scrollbar pb-2 mb-3">
-              {setlist.map((item, idx) => {
-                const sc = (songsDb.find(d => d.id === item.songId)?.sheets || []).length;
-                return (
-                  <button key={item.id || idx} onClick={() => { setActiveSheetSong(idx); setActiveSheetId(null); }}
-                    className={`shrink-0 px-3 py-2 rounded-lg text-xs font-bold transition border flex items-center gap-1.5 ${idx === activeSheetSong ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
-                    <span className="opacity-60">{idx + 1}.</span>
-                    <span className="max-w-[130px] truncate">{item.title}</span>
-                    {sc === 0 && <span className="text-[9px] opacity-50">✕</span>}
-                  </button>
-                );
-              })}
-            </div>
+            {/* 完整 Song Map —— 用浮層疊在上面，不佔走樂譜的高度 */}
+            {showSongMap && (
+              <>
+                <div className="fixed inset-0 z-[70]" onClick={() => setShowSongMap(false)} />
+                <div className="absolute left-0 right-0 z-[80] bg-slate-50 border-b border-slate-300 shadow-xl px-3 sm:px-5 py-3 max-h-[45vh] overflow-y-auto custom-scrollbar"
+                     style={{ top: '48px' }}>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-1">
+                    {setlist.map((item, idx) => (
+                      <button key={item.id || idx} onClick={() => { setActiveSheetSong(idx); setActiveSheetId(null); setShowSongMap(false); }}
+                        className={`text-left flex gap-2 items-start p-1.5 rounded-lg transition ${idx === activeSheetSong ? 'bg-white shadow-sm border border-sky-200' : 'hover:bg-white/70 border border-transparent'}`}>
+                        <span className={`shrink-0 w-4 h-4 rounded flex items-center justify-center font-bold font-serif text-[9px] mt-0.5 ${idx === activeSheetSong ? 'bg-sky-500 text-white' : 'bg-slate-900 text-white'}`}>{idx + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-serif font-bold text-[12px] text-slate-900 truncate">{item.title}</span>
+                            <span className="font-mono text-[9px] font-bold text-sky-600 bg-sky-100/80 border border-sky-200 px-1 rounded shrink-0">{item.key}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono tracking-wide truncate">{item.mapString}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
 
-            {/* 樂譜選擇：藍＝調性相符 灰＝未標調性 黃＝不同調性 */}
-            {active && (
-              <div className="flex flex-wrap items-center gap-2 mb-3">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mr-1">{t('可用樂譜', language)}</span>
-                {sheets.length === 0 && <span className="text-xs text-slate-400 italic">{t('這首歌還沒有樂譜', language)}</span>}
-                {sheets.map(sh => {
-                  const tone = sheetTone(sh, active.key);
-                  const on = chosen?.id === sh.id;
+            {/* 歌曲分頁 + 樂譜選擇 */}
+            <div className="shrink-0 bg-white border-b border-slate-200 px-3 sm:px-5 py-2 space-y-2">
+              <div className="flex gap-1.5 overflow-x-auto custom-scrollbar">
+                {setlist.map((item, idx) => {
+                  const sc = (songsDb.find(d => d.id === item.songId)?.sheets || []).length;
                   return (
-                    <button key={sh.id} onClick={() => setActiveSheetId(sh.id)}
-                      className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition flex items-center gap-1.5 ${on ? TONE_STYLES[tone].chip : TONE_STYLES[tone].idle}`}>
-                      <span className="font-mono">{sh.key || t('未標調性', language)}</span>
-                      {sh.pageCount > 1 && <span className="opacity-70 font-normal">{sh.pageCount}p</span>}
-                      {sh.label && <span className="opacity-70 font-normal max-w-[80px] truncate">{sh.label}</span>}
+                    <button key={item.id || idx} onClick={() => { setActiveSheetSong(idx); setActiveSheetId(null); }}
+                      className={`shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition border flex items-center gap-1.5 ${idx === activeSheetSong ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
+                      <span className="opacity-60">{idx + 1}.</span>
+                      <span className="max-w-[120px] truncate">{item.title}</span>
+                      {sc === 0 && <span className="text-[9px] opacity-50">✕</span>}
                     </button>
                   );
                 })}
-                {chosen && (
-                  <a href={chosen.url} target="_blank" rel="noopener noreferrer"
-                     className="ml-auto px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-500 hover:text-sky-600 hover:border-sky-300 transition flex items-center gap-1.5">
-                    <Eye size={13}/> {t('開新分頁', language)}
-                  </a>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {sheets.length === 0
+                  ? <span className="text-[11px] text-slate-400 italic">{t('這首歌還沒有樂譜', language)}</span>
+                  : sheets.map(sh => {
+                      const tone = sheetTone(sh, active?.key);
+                      const on = chosen?.id === sh.id;
+                      return (
+                        <button key={sh.id} onClick={() => setActiveSheetId(sh.id)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition flex items-center gap-1.5 ${on ? TONE_STYLES[tone].chip : TONE_STYLES[tone].idle}`}>
+                          <span className="font-mono">{sh.key || t('未標調性', language)}</span>
+                          {sh.pageCount > 1 && <span className="opacity-70 font-normal">{sh.pageCount}p</span>}
+                          {sh.label && <span className="opacity-70 font-normal max-w-[70px] truncate">{sh.label}</span>}
+                        </button>
+                      );
+                    })}
+                {chosen && sheetTone(chosen, active?.key) === 'diff' && (
+                  <span className="text-[10px] text-amber-700 font-bold bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    ⚠️ {keyMismatchNote(chosen, active.key, language)}
+                  </span>
                 )}
+              </div>
+            </div>
+
+            {mergeError && (
+              <div className="shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 text-[11px] text-amber-800 font-bold flex items-start gap-2">
+                <X size={14} className="shrink-0 mt-0.5 cursor-pointer" onClick={() => setMergeError('')}/>
+                <span className="leading-relaxed">{mergeError}</span>
               </div>
             )}
 
-            {chosen && sheetTone(chosen, active?.key) === 'diff' && (
-              <p className="text-[11px] text-amber-700 font-bold mb-2 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                ⚠️ {keyMismatchNote(chosen, active.key, language)}
-              </p>
-            )}
-
-            <SheetViewer key={chosen?.id || 'none'} sheet={chosen} language={language} />
+            {/* 樂譜：吃掉所有剩餘高度 */}
+            <div className="flex-1 min-h-0 p-2 sm:p-3">
+              <SheetViewer key={chosen?.id || 'none'} sheet={chosen} language={language} height="100%" />
+            </div>
           </div>
         );
       })()}
