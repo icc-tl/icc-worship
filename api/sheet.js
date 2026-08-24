@@ -63,7 +63,7 @@ export default async function handler(req, res) {
   const auth = await verifyAdmin(req);
   if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
 
-  const { action, contentType, size, key } = req.body || {};
+  const { action, contentType, size, key, filename } = req.body || {};
   const bucket = process.env.R2_BUCKET;
 
   try {
