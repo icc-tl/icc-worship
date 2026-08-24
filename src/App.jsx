@@ -22,6 +22,24 @@ const TRANSLATIONS = {
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
   "登出": "Sign Out",
+  "這份樂譜上找不到「Verse／Chorus」之類的段落標記，系統不猜測、直接原樣帶入。帶入後請在下方歌詞區自行切分段落並標上標籤。": "There are no Verse/Chorus markers to go on, so nothing was guessed — the text comes in as one block. Split it into sections and label them in the lyrics area below.",
+  "沒有自動分段": "Not split into sections.",
+  "這份樂譜沒有段落標記，以下是原樣擷取的文字": "No section markers on this sheet — this is the text exactly as extracted",
+  "段": "sections",
+  "樂譜上有段落標記，已依標記分成": "The sheet has section markers — split into",
+  "填入歌詞": "Fill in lyrics",
+  "取代現有歌詞": "Replace current lyrics",
+  "請先確認內容正確 —— 雙欄排版的樂譜可能會把兩欄讀成同一行，一份含多首歌的檔案也可能混進別首的歌詞。": "Check this before applying — a two-column sheet can read across the columns, and a file holding several songs can pull in the wrong lyrics.",
+  "行和弦與標題資訊": "lines of chords and headings",
+  "已濾掉": "filtered out",
+  "這份樂譜沒有段落標記，全部歸在同一段": "No section markers on this sheet, so it all goes in one block",
+  "個段落": "sections",
+  "抽出": "Found",
+  "這份樂譜抽不到歌詞內容": "No lyrics could be found in this sheet",
+  "這份樂譜是掃描檔或文字編碼不完整，無法抽取歌詞": "This sheet is a scan, or its text is not readable — lyrics cannot be pulled from it",
+  "確認要帶入的歌詞": "Check the lyrics before filling them in",
+  "從這份樂譜抽出歌詞，確認後才會填入": "Pull lyrics from this sheet — you confirm before anything is filled in",
+  "帶入歌詞": "Get Lyrics",
   "步驟4 寫入資料庫失敗": "Step 4 could not save to the database",
   "步驟3 雲端拒絕上傳": "Step 3 storage rejected the upload",
   "步驟3 上傳到雲端失敗（多為 R2 的 CORS 設定）": "Step 3 upload to storage failed (usually the R2 CORS policy)",
@@ -540,6 +558,157 @@ const prefersNativeViewer = (() => {
   if (touch > 1 && (/Mac/.test(ua) || navigator.platform === 'MacIntel')) return true;
   return false;
 })();
+
+// -----------------------------------------------------------------------------
+// 從樂譜抽取歌詞
+//
+// 只對「PDF 本身帶文字圖層」的樂譜有效（約四成）。掃描或拍照的譜抽不出東西，
+// 這種情況按鈕不會出現，主領照舊手動填。
+// 抽出來的結果一律先給人看過再套用 —— 有三種失敗模式程式判斷不了：
+// 字型編碼錯亂、雙欄排版被讀成同一行、一份檔案含多首歌。
+// -----------------------------------------------------------------------------
+
+// 整行都是和弦（含 | C - - - | 這種小節記號）就丟掉
+const CHORD_LINE = /^[\s|]*(?:[A-G][#b♭♯]?(?:maj|min|m|sus|dim|aug|add)?\d*(?:\/[A-G][#b♭♯]?)?|[-–—x×%|:.]+)(?:[\s|]+(?:[A-G][#b♭♯]?(?:maj|min|m|sus|dim|aug|add)?\d*(?:\/[A-G][#b♭♯]?)?|[-–—x×%|:.]+))*[\s|]*$/;
+
+// 樂譜上的中繼資訊，不是歌詞
+const META_LINE = /^\s*(original\s*key|key|bpm|tempo|capo|time|ccli|copyright|©|作詞|作曲|詞[:：]|曲[:：]|編曲|演唱|專輯|歌曲)\s*[:：]?/i;
+
+// 段落標記 -> 系統使用的標籤
+const SECTION_MAP = [
+  [/^(intro|前奏)\s*\d*$/i, 'I'],
+  [/^(pre[-\s]?chorus|導歌)\s*(\d*)$/i, 'PC'],
+  [/^(chorus|副歌)\s*(\d?)$/i, 'C'],
+  [/^(verse|主歌)\s*(\d?)$/i, 'V'],
+  [/^(bridge|橋段)\s*\d*$/i, 'B'],
+  [/^(interlude|間奏)\s*\d*$/i, 'IT'],
+  [/^(outro|尾奏)\s*\d*$/i, 'OT'],
+  [/^(ending|結尾)\s*\d*$/i, 'E'],
+  [/^(v|c|b|pc|i|it|fw|ot|e)(\d?)$/i, null],   // 已經是簡寫
+];
+
+const asSectionTag = (line) => {
+  // 樂譜上的標記常寫成「Intro:」「V:」「[Chorus]」，
+  // 先去掉外圍的括號與結尾冒號再比對，否則會整批漏掉。
+  const t = line.trim()
+    .replace(/^[[(【\s]+/, '')
+    .replace(/[\])】\s]+$/, '')
+    .replace(/[:：]\s*$/, '')
+    .trim();
+  if (!t || t.length > 12) return null;
+  for (const [re, tag] of SECTION_MAP) {
+    const m = t.match(re);
+    if (!m) continue;
+    if (tag === null) return t.toUpperCase();
+    const num = (m[2] || '').trim();
+    return tag + (num && tag !== 'I' ? num : '');
+  }
+  return null;
+};
+
+// 抽出來的東西到底能不能用。
+// 字型子集沒有對應表時，抽出來的碼位是隨機的 CJK/韓文 —— 看起來像字，其實是垃圾。
+const looksUsable = (text) => {
+  const cjk = text.match(/[\u4e00-\u9fff]/g) || [];
+  const latinWords = text.match(/[A-Za-z]{2,}/g) || [];
+  if (cjk.length < 20 && latinWords.length < 25) return false;   // 內容太少
+  if (cjk.length >= 20) {
+    const COMMON = '的一是我你祢神主耶穌愛心生命讚美敬拜榮耀在有不了為到來去天地上下大人父聖靈恩典力量喜樂平安永遠世界救恩活呼求禱告相信盼望信跟隨獻感謝稱頌歌唱歡呼全能至高唯奇妙';
+    const hit = cjk.filter(c => COMMON.includes(c)).length / cjk.length;
+    const weird = ((text.match(/[\uac00-\ud7af]/g) || []).length +
+                   (text.match(/[\u3400-\u4dbf\uf900-\ufaff]/g) || []).length) / cjk.length;
+    if (weird > 0.02 || hit < 0.05) return false;   // 編碼錯亂
+  }
+  return true;
+};
+
+// 把 PDF 的文字片段依垂直位置還原成一行一行
+const linesFromTextContent = (tc) => {
+  const rows = new Map();
+  for (const item of tc.items) {
+    if (!item.str) continue;
+    const y = Math.round(item.transform[5]);
+    const key = Math.round(y / 3) * 3;            // 容許些微誤差視為同一行
+    if (!rows.has(key)) rows.set(key, []);
+    rows.get(key).push({ x: item.transform[4], s: item.str });
+  }
+  return [...rows.entries()]
+    .sort((a, b) => b[0] - a[0])                  // PDF 的 y 由下往上
+    .map(([, parts]) => parts.sort((a, b) => a.x - b.x).map(p => p.s).join('').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+};
+
+const extractLyricsFromSheet = async (sheet, songTitle) => {
+  const lib = await loadPdfLib();
+  // 與檢視器同樣的處理：樂譜設了長期 immutable 快取，
+  // 若使用者手上存著缺 CORS 標頭的舊回應，正常請求會被瀏覽器擋下。
+  const open = (u) => lib.getDocument({ url: u }).promise;
+  let doc;
+  try {
+    doc = await open(sheet.url);
+  } catch {
+    doc = await open(`${sheet.url}${sheet.url.includes('?') ? '&' : '?'}r=${Date.now()}`);
+  }
+  let lines = [];
+  for (let i = 1; i <= Math.min(doc.numPages, 6); i++) {
+    const page = await doc.getPage(i);
+    lines = lines.concat(linesFromTextContent(await page.getTextContent()));
+  }
+  const raw = lines.join('\n');
+  if (!looksUsable(raw)) return { ok: false, reason: 'unusable' };
+
+  // 濾掉和弦、中繼資訊、與歌名本身
+  const titleNorm = String(songTitle || '').replace(/\s/g, '');
+  const kept = lines.filter(l => {
+    const t = l.trim();
+    if (!t) return false;
+    // 和弦行常帶括號註記，如「Am F C G (G#dim)」「C (升Key: A7)」，
+    // 先把結尾的括號拿掉再判斷，否則整行會被當成歌詞留下來
+    const bare = t.replace(/\s*[（(][^）)]*[）)]\s*$/, '').trim();
+    if (CHORD_LINE.test(t) || (bare && CHORD_LINE.test(bare))) return false;
+    if (META_LINE.test(t)) return false;
+    if (titleNorm && t.replace(/\s/g, '') === titleNorm) return false;
+    return true;
+  });
+
+  // 依段落標記切分
+  const sections = [];
+  let current = null;
+  let markers = 0;                       // 實際認出幾個段落標記
+  for (const line of kept) {
+    const tag = asSectionTag(line);
+    if (tag) { markers++; current = { section: tag, text: [] }; sections.push(current); continue; }
+    if (!current) { current = { section: 'V', text: [], guessed: true }; sections.push(current); }
+    current.text.push(line);
+  }
+  const out = sections
+    .map(x => ({ section: x.section, text: x.text.join('\n').trim(), guessed: !!x.guessed }))
+    .filter(x => x.text);
+
+  if (out.length === 0) return { ok: false, reason: 'empty' };
+
+  // 只有真的讀到兩個以上的標記才算「有把握分段」。
+  // 標記前的零散文字會自成一段，光看段落數會高估把握程度。
+  const confident = markers >= 2;
+
+  if (!confident) {
+    // 沒把握就不要假裝分好了 —— 全部併成一段交給主領自己切，
+    // 亂分比不分更難收拾。
+    return {
+      ok: true,
+      confident: false,
+      sections: [{ section: 'V', text: out.map(x => x.text).join('\n') }],
+      droppedChords: lines.length - kept.length,
+    };
+  }
+
+  return {
+    ok: true,
+    confident: true,
+    sections: out.filter(x => !x.guessed),   // 捨棄標記前的標題／版權資訊
+    droppedChords: lines.length - kept.length,
+  };
+};
 
 const SheetViewer = ({ sheet, language, height = '75vh' }) => {
   const wrapRef = useRef(null);
@@ -1533,6 +1702,8 @@ export default function App() {
   const [uploadingSheet, setUploadingSheet] = useState(false);
   const [deleteSheetTarget, setDeleteSheetTarget] = useState(null);
   const [previewSheet, setPreviewSheet] = useState(null);
+  const [extracting, setExtracting] = useState('');
+  const [extractResult, setExtractResult] = useState(null);   // { sheet, sections, sectioned }
 
   const callSheetApi = async (payload) => {
     let token;
@@ -1556,7 +1727,7 @@ export default function App() {
     if (!r.ok) {
       // 把伺服器回傳的細節一起帶出來，否則畫面上只看到一句「處理失敗」無從判斷
       const parts = [data.error || `HTTP ${r.status}`, data.hint, data.details].filter(Boolean);
-      throw new Error(parts.join('　'));
+      throw new Error(parts.join(' '));
     }
     return data;
   };
@@ -1691,6 +1862,31 @@ export default function App() {
     } finally {
       setMergingPdf(false);
     }
+  };
+
+  // 從樂譜帶入歌詞。抽完先給人看，確認後才寫進歌詞欄。
+  const handleExtractLyrics = async (sheet) => {
+    setExtracting(sheet.id); setSheetError('');
+    try {
+      const r = await extractLyricsFromSheet(sheet, customTitle);
+      if (!r.ok) {
+        setSheetError(r.reason === 'unusable'
+          ? t('這份樂譜是掃描檔或文字編碼不完整，無法抽取歌詞', language)
+          : t('這份樂譜抽不到歌詞內容', language));
+        return;
+      }
+      setExtractResult({ sheet, ...r });
+    } catch {
+      setSheetError(t('這份樂譜是掃描檔或文字編碼不完整，無法抽取歌詞', language));
+    } finally {
+      setExtracting('');
+    }
+  };
+
+  const applyExtractedLyrics = () => {
+    if (!extractResult) return;
+    setCustomLyrics(extractResult.sections.map(x => ({ section: x.section, text: x.text })));
+    setExtractResult(null);
   };
 
   const executeDeleteDbSong = async (id) => { if (!user) return; await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', id)); setDeleteConfirmId(null); };
@@ -1983,6 +2179,60 @@ export default function App() {
         cancelText={t('取消', language)} confirmText={t('永久刪除', language)}
         onCancel={() => setDeleteSheetTarget(null)}
         onConfirm={() => handleDeleteSheetForever(deleteSheetTarget)} />
+
+      {/* 抽取結果確認 —— 絕不自動填入 */}
+      {extractResult && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[220] flex items-center justify-center p-3 sm:p-6">
+          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[88vh] shadow-2xl flex flex-col overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 shrink-0">
+              <h3 className="font-serif font-bold text-slate-900 flex items-center gap-2">
+                <BookOpen size={18} className="text-sky-500"/> {t('確認要帶入的歌詞', language)}
+              </h3>
+              <p className="text-[12px] text-slate-500 mt-1 leading-relaxed">
+                {extractResult.confident
+                  ? `${t('樂譜上有段落標記，已依標記分成', language)} ${extractResult.sections.length} ${t('段', language)}`
+                  : t('這份樂譜沒有段落標記，以下是原樣擷取的文字', language)}
+                {extractResult.droppedChords > 0 && `，${t('已濾掉', language)} ${extractResult.droppedChords} ${t('行和弦與標題資訊', language)}`}
+              </p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-3 bg-slate-50">
+              {!extractResult.confident && (
+                <div className="bg-sky-50 border border-sky-200 rounded-xl px-3 py-2.5">
+                  <p className="text-[12px] text-sky-900 leading-relaxed">
+                    <b>{t('沒有自動分段', language)}</b> 
+                    {t('這份樂譜上找不到「Verse／Chorus」之類的段落標記，系統不猜測、直接原樣帶入。帶入後請在下方歌詞區自行切分段落並標上標籤。', language)}
+                  </p>
+                </div>
+              )}
+              {extractResult.sections.map((x, i) => (
+                <div key={i} className="bg-white border border-slate-200 rounded-xl p-3">
+                  {extractResult.confident && (
+                    <span className="inline-block px-2 py-0.5 bg-slate-100 text-slate-700 font-mono text-[10px] font-bold rounded mb-1.5">{x.section}</span>
+                  )}
+                  <pre className="whitespace-pre-wrap font-sans text-[13px] text-slate-800 leading-relaxed m-0">{x.text}</pre>
+                </div>
+              ))}
+            </div>
+
+            <div className="px-5 py-4 border-t border-slate-100 shrink-0 bg-white">
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 leading-relaxed">
+                {t('請先確認內容正確 —— 雙欄排版的樂譜可能會把兩欄讀成同一行，一份含多首歌的檔案也可能混進別首的歌詞。', language)}
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setExtractResult(null)}
+                  className="flex-1 px-4 py-2.5 text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold transition">
+                  {t('取消', language)}
+                </button>
+                <button onClick={applyExtractedLyrics}
+                  className="flex-[2] px-4 py-2.5 bg-sky-500 hover:bg-sky-600 text-white text-sm font-bold rounded-xl shadow-md transition">
+                  {customLyrics.some(l => l.text?.trim()) ? t('取代現有歌詞', language) : t('填入歌詞', language)}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 樂譜快速預覽 */}
       {previewSheet && (
@@ -2582,6 +2832,14 @@ export default function App() {
                             <Eye size={14}/> {t('檢視', language)}
                             {sh.pageCount > 1 && <span className="opacity-60">{sh.pageCount}p</span>}
                           </button>
+                          {!prefersNativeViewer && (
+                            <button onClick={() => handleExtractLyrics(sh)} disabled={extracting === sh.id}
+                              className="relative group/tt shrink-0 flex items-center gap-1.5 px-2.5 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:border-sky-400 hover:text-sky-600 transition disabled:opacity-50">
+                              {extracting === sh.id ? <Loader2 size={14} className="animate-spin"/> : <BookOpen size={14}/>}
+                              {t('帶入歌詞', language)}
+                              <FastTooltip text={t('從這份樂譜抽出歌詞，確認後才會填入', language)} position="left"/>
+                            </button>
+                          )}
                           <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2 min-w-0">
                             <input type="text" list="key-list" defaultValue={sh.key || ''} placeholder={t('調性', language)}
                               onBlur={e => e.target.value !== (sh.key || '') && updateSheetMeta(editingDbSongId, sh.id, { key: e.target.value.trim() || null })}
