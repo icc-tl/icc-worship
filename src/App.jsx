@@ -1652,7 +1652,14 @@ export default function App() {
         lyrics: filteredLyrics 
       };
       
-      await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', sid), ns);
+      // 這裡是整份覆寫，而 ns 不含 sheets —— 若不先取回既有樂譜就會把關聯抹掉。
+      // 樂譜不是在這個表單裡編輯的，儲存歌詞欄位不該動到它。
+      let existingSheets = [];
+      if (editingDbSongId) {
+        try { existingSheets = (await fetchSong(editingDbSongId))?.sheets || []; } catch { /* 讀不到就維持空陣列 */ }
+      }
+      await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', sid),
+                   { ...ns, sheets: existingSheets });
       
       setHasUnsavedChanges(false);
       setAutoCreatedSongId(null);   // 已正式儲存，取消不該再刪它
@@ -1991,12 +1998,18 @@ export default function App() {
   const [autoCreatedSongId, setAutoCreatedSongId] = useState(null);
   const [cancelling, setCancelling] = useState(false);
 
+  // 取消永遠不動樂譜關聯 —— 不管是新建還是編輯既有的歌。
+  // 只有「新建過程中自動產生、而且還沒掛上任何樂譜」的空殼才會被清掉；
+  // 一旦掛了樂譜就保留那首歌，寧可留下一筆待整理的資料，也不要弄丟樂譜。
   const handleCancelManual = async () => {
     if (!autoCreatedSongId) { setView(manualSource); return; }
     setCancelling(true);
     try {
-      await releaseSheetsToPool(autoCreatedSongId);
-      await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', autoCreatedSongId));
+      const draft = await fetchSong(autoCreatedSongId).catch(() => null);
+      const hasSheets = (draft?.sheets || []).length > 0;
+      if (!hasSheets) {
+        await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', autoCreatedSongId));
+      }
     } catch (e) {
       console.error('Cancel cleanup error:', e);
     } finally {
