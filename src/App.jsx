@@ -504,14 +504,24 @@ const safeScale = (baseW, baseH, wanted) => {
   return wanted * cap;
 };
 
+// iPad／iPhone 上 PDF.js 畫不出 canvas（試過多種修法都無效），
+// 但瀏覽器內建的顯示是好的。與其讓使用者空等看門狗逾時，
+// 直接判斷裝置走內建路線。iPadOS 會偽裝成 Mac，所以要靠觸控點數辨識。
+const prefersNativeViewer = (() => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /iPad|iPhone|iPod/.test(ua) ||
+         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+})();
+
 const SheetViewer = ({ sheet, language, height = '75vh' }) => {
   const wrapRef = useRef(null);
   const [doc, setDoc] = useState(null);
   const [pageNum, setPageNum] = useState(1);
-  const [status, setStatus] = useState(sheet?.url ? 'loading' : 'idle');   // idle | loading | ready | error
+  const [status, setStatus] = useState(sheet?.url && !prefersNativeViewer ? 'loading' : 'idle');   // idle | loading | ready | error
   const [zoom, setZoom] = useState(1);
   const [wrapWidth, setWrapWidth] = useState(0);
-  const [canvasBlank, setCanvasBlank] = useState(false);
+  const [canvasBlank, setCanvasBlank] = useState(prefersNativeViewer);
   const [rendered, setRendered] = useState(false);
   const canvasRef = useRef(null);
   const renderTaskRef = useRef(null);
@@ -519,7 +529,7 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
   // 換一份樂譜時由呼叫端的 key 觸發重新掛載，這裡只負責載入，
   // 不在 effect 內同步重設狀態（那會造成連鎖渲染）
   useEffect(() => {
-    if (!sheet?.url) return;
+    if (!sheet?.url || prefersNativeViewer) return;   // iOS 直接走內建顯示，不必載入 PDF.js
     let cancelled = false;
     (async () => {
       const lib = await loadPdfLib();
@@ -641,10 +651,12 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
   // 一段時間內沒有確認畫出內容，就直接改用瀏覽器內建顯示，
   // 至少保證看得到譜，而不是停在一片空白。
   useEffect(() => {
-    if (!sheet?.url || canvasBlank || rendered) return;
-    const timer = setTimeout(() => setCanvasBlank(true), 6000);
+    // 只在「文件已載入、正要畫」之後才計時。
+    // 否則網路慢時下載還沒完成就會被誤判成渲染失敗。
+    if (!doc || canvasBlank || rendered) return;
+    const timer = setTimeout(() => setCanvasBlank(true), 3500);
     return () => clearTimeout(timer);
-  }, [sheet?.url, canvasBlank, rendered]);
+  }, [doc, canvasBlank, rendered]);
 
   // 監看容器寬度：iOS 首次量到 0、或使用者轉向時，都要重畫
   useEffect(() => {
@@ -681,7 +693,7 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
           <button onClick={() => setPageNum(n => Math.min(total, n + 1))} disabled={pageNum >= total || !doc}
             className="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-slate-50 disabled:opacity-30 transition"><ChevronRight size={18}/></button>
         </div>
-        {canvasBlank && (
+        {canvasBlank && !prefersNativeViewer && (
           <span className="text-[11px] text-slate-500 font-medium">{t('已切換為瀏覽器內建顯示', language)}</span>
         )}
         <div className={`flex items-center gap-1 ${canvasBlank ? 'ml-auto' : ''}`}>
