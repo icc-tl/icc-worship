@@ -22,6 +22,7 @@ const TRANSLATIONS = {
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
   "登出": "Sign Out",
+  "已切換為瀏覽器內建顯示": "Using the browser's built-in viewer",
   "已合併，但這些歌沒有可用樂譜：": "Merged, but these songs had no sheet: ",
   "沒有可合併的樂譜": "No sheets available to merge",
   "合併中...": "Merging...",
@@ -508,6 +509,8 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
   const [pageNum, setPageNum] = useState(1);
   const [status, setStatus] = useState(sheet?.url ? 'loading' : 'idle');   // idle | loading | ready | error
   const [zoom, setZoom] = useState(1);
+  const [wrapWidth, setWrapWidth] = useState(0);
+  const [canvasBlank, setCanvasBlank] = useState(false);
   const canvasRef = useRef(null);
   const renderTaskRef = useRef(null);
 
@@ -558,7 +561,10 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
       if (cancelled || !canvasRef.current) return;
 
       const canvas = canvasRef.current;
-      const avail = (wrapRef.current?.clientWidth || 800) - 24;
+      // iOS 上 effect 可能早於版面就緒，clientWidth 會是 0，
+      // 算出來的畫布尺寸就變成 0 —— 工具列正常但譜是空白的典型症狀。
+      const measured = wrapRef.current?.clientWidth || 0;
+      const avail = Math.max(280, (measured > 40 ? measured : (window.innerWidth || 800)) - 24);
       const base = page.getViewport({ scale: 1 });
       const cssScale = (avail / base.width) * zoom;
 
@@ -610,12 +616,26 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
         renderTaskRef.current = t2;
         try { await t2.promise; } catch { /* 忽略 */ }
       } else if (blank) {
-        if (!cancelled) setStatus('error');
+        // canvas 這條路走不通（某些 iOS 版本就是畫不出來），
+        // 改用瀏覽器內建的內嵌顯示。使用者已證實直接開啟 PDF 是正常的。
+        if (!cancelled) setCanvasBlank(true);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [doc, pageNum, zoom]);
+  }, [doc, pageNum, zoom, wrapWidth]);
+
+  // 監看容器寬度：iOS 首次量到 0、或使用者轉向時，都要重畫
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      setWrapWidth(prev => (Math.abs(prev - w) > 8 ? w : prev));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   if (!sheet) {
     return (
@@ -631,7 +651,7 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
     <div className="flex flex-col bg-slate-100 border border-slate-200 rounded-xl overflow-hidden" style={{ height }}>
       {/* 工具列 */}
       <div className="flex items-center justify-between gap-2 px-3 py-2 bg-white border-b border-slate-200 shrink-0">
-        <div className="flex items-center gap-1">
+        <div className={`flex items-center gap-1 ${canvasBlank ? 'hidden' : ''}`}>
           <button onClick={() => setPageNum(n => Math.max(1, n - 1))} disabled={pageNum <= 1 || !doc}
             className="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-slate-50 disabled:opacity-30 transition"><ChevronLeft size={18}/></button>
           <span className="text-xs font-mono font-bold text-slate-600 tabular-nums min-w-[62px] text-center">
@@ -640,12 +660,17 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
           <button onClick={() => setPageNum(n => Math.min(total, n + 1))} disabled={pageNum >= total || !doc}
             className="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-slate-50 disabled:opacity-30 transition"><ChevronRight size={18}/></button>
         </div>
-        <div className="flex items-center gap-1">
+        {canvasBlank && (
+          <span className="text-[11px] text-slate-500 font-medium">{t('已切換為瀏覽器內建顯示', language)}</span>
+        )}
+        <div className={`flex items-center gap-1 ${canvasBlank ? 'ml-auto' : ''}`}>
           <button onClick={() => setZoom(z => Math.max(0.5, +(z - 0.25).toFixed(2)))} disabled={zoom <= 0.5}
+            style={canvasBlank ? { display: 'none' } : undefined}
             className="px-2 py-1 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-slate-50 text-sm font-bold disabled:opacity-30 transition">−</button>
-          <button onClick={() => setZoom(1)}
+          <button onClick={() => setZoom(1)} style={canvasBlank ? { display: 'none' } : undefined}
             className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-500 hover:text-sky-600 hover:bg-slate-50 transition tabular-nums">{Math.round(zoom * 100)}%</button>
           <button onClick={() => setZoom(z => Math.min(3, +(z + 0.25).toFixed(2)))} disabled={zoom >= 3}
+            style={canvasBlank ? { display: 'none' } : undefined}
             className="px-2 py-1 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-slate-50 text-sm font-bold disabled:opacity-30 transition">＋</button>
           <a href={sheet.url} target="_blank" rel="noopener noreferrer"
              className="ml-1 p-1.5 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-slate-50 transition"><Eye size={16}/></a>
@@ -670,7 +695,11 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
             </a>
           </div>
         )}
-        <canvas ref={canvasRef} className={`shadow-lg bg-white rounded ${status === 'ready' ? '' : 'hidden'}`} />
+        {canvasBlank ? (
+          <iframe src={sheet.url} title={sheet.title || 'sheet'} className="w-full h-full border-0 rounded bg-white" />
+        ) : (
+          <canvas ref={canvasRef} className={`shadow-lg bg-white rounded ${status === 'ready' ? '' : 'hidden'}`} />
+        )}
       </div>
     </div>
   );
