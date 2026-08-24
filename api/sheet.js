@@ -5,6 +5,7 @@
 // 或代為刪除檔案。前端全程接觸不到金鑰。
 import { S3Client, DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { randomBytes } from 'node:crypto';
 
 const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY;
 const ADMIN_UID = process.env.ADMIN_UID;
@@ -48,8 +49,15 @@ function s3() {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
-  if (!FIREBASE_API_KEY || !ADMIN_UID || !process.env.R2_ACCOUNT_ID) {
-    return res.status(500).json({ error: '伺服器環境變數尚未設定完成' });
+  // 逐一檢查並指名缺哪個，否則後面只會拋出難以判讀的 TypeError
+  const REQUIRED = ['FIREBASE_API_KEY', 'ADMIN_UID', 'R2_ACCOUNT_ID',
+                    'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET', 'R2_PUBLIC_URL'];
+  const missing = REQUIRED.filter(k => !process.env[k]);
+  if (missing.length) {
+    return res.status(500).json({
+      error: `伺服器缺少環境變數：${missing.join('、')}`,
+      hint: '請在 Vercel → Settings → Environment Variables 補上，並重新部署一次。',
+    });
   }
 
   const auth = await verifyAdmin(req);
@@ -65,8 +73,7 @@ export default async function handler(req, res) {
       if (!size || size > MAX_BYTES) return res.status(400).json({ error: '檔案不可超過 25 MB' });
 
       // 不可猜測的路徑
-      const rand = () => [...crypto.getRandomValues(new Uint8Array(12))]
-        .map(b => b.toString(16).padStart(2, '0')).join('');
+      const rand = () => randomBytes(12).toString('hex');
       const objectKey = `sheets/${rand()}/${rand().slice(0, 16)}.${ext}`;
 
       // 物件路徑是隨機的（避免被猜到），所以要另外指定下載時顯示的檔名，

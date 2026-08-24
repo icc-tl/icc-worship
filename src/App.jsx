@@ -1538,7 +1538,11 @@ export default function App() {
       body: JSON.stringify(payload),
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    if (!r.ok) {
+      // 把伺服器回傳的細節一起帶出來，否則畫面上只看到一句「處理失敗」無從判斷
+      const parts = [data.error || `HTTP ${r.status}`, data.hint, data.details].filter(Boolean);
+      throw new Error(parts.join('　'));
+    }
     return data;
   };
 
