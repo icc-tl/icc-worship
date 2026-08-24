@@ -585,10 +585,20 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
       // 抽樣檢查，真的空白就用更小的尺寸重畫一次。
       const blank = (() => {
         try {
-          const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-          for (let i = 0; i < d.length; i += 4000) if (d[i] < 245) return false;
+          // 只抽樣幾個小區塊。讀整張畫布在 4096x4096 時要配置約 67MB，
+          // 在 iPad 上足以讓分頁被系統回收 —— 那正是這裡要避免的事。
+          const S = 48;
+          const spots = [0.15, 0.35, 0.5, 0.7, 0.88];
+          for (const fy of spots) {
+            for (const fx of [0.25, 0.55, 0.8]) {
+              const x = Math.max(0, Math.min(canvas.width - S, Math.floor(canvas.width * fx)));
+              const y = Math.max(0, Math.min(canvas.height - S, Math.floor(canvas.height * fy)));
+              const d = ctx.getImageData(x, y, S, S).data;
+              for (let i = 0; i < d.length; i += 4) if (d[i] < 245) return false;
+            }
+          }
           return true;
-        } catch { return false; }   // 跨來源污染等情況無法檢查，當作正常
+        } catch { return false; }   // 無法檢查時當作正常，不要誤判
       })();
 
       if (blank && drawScale > cssScale * 0.4) {
@@ -2510,7 +2520,10 @@ export default function App() {
         const sheets = dbSong?.sheets || [];
         const chosen = sheets.find(x => x.id === activeSheetId) || pickSheetForKey(sheets, active?.key);
         return (
-          <div className="fixed inset-0 top-0 flex flex-col bg-[#FAFAFA] z-[60] overflow-hidden">
+          <div className="fixed inset-x-0 top-0 flex flex-col bg-[#FAFAFA] z-[60] overflow-hidden"
+               /* iOS 的網址列會伸縮，inset-0 算出來的高度可能是錯的或為 0。
+                  dvh 才是隨可視區域變動的單位，vh 留作舊瀏覽器的後備。 */
+               style={{ height: '100vh', maxHeight: '100dvh', minHeight: '100dvh' }}>
             {/* 頂列 */}
             <div className="shrink-0 bg-white border-b border-slate-200 px-3 sm:px-5 py-2.5 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
