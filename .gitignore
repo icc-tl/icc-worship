@@ -30,3 +30,4 @@ tools/songs.json
 tools/uploaded.json
 tools/__pycache__/
 tools/match.json
+tools/pages/

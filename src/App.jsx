@@ -22,6 +22,8 @@ const TRANSLATIONS = {
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
   "登出": "Sign Out",
+  "頁": "pages",
+  "用新分頁開啟原始 PDF": "Open the original PDF in a new tab",
   "看不到？點此用新分頁開啟": "Can't see it? Open in a new tab",
   "已切換為瀏覽器內建顯示": "Using the browser's built-in viewer",
   "已合併，但這些歌沒有可用樂譜：": "Merged, but these songs had no sheet: ",
@@ -529,6 +531,7 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
   const [wrapWidth, setWrapWidth] = useState(0);
   const [canvasBlank, setCanvasBlank] = useState(prefersNativeViewer);
   const [rendered, setRendered] = useState(false);
+  const pageImages = sheet?.pageImages || [];
   const canvasRef = useRef(null);
   const renderTaskRef = useRef(null);
 
@@ -685,11 +688,14 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
     );
   }
 
-  const total = doc?.numPages || 0;
+  const total = doc?.numPages || (canvasBlank ? pageImages.length : 0);
   return (
     <div className="flex flex-col bg-slate-100 border border-slate-200 rounded-xl overflow-hidden" style={{ height }}>
       {/* 工具列 */}
       <div className="flex items-center justify-between gap-2 px-3 py-2 bg-white border-b border-slate-200 shrink-0">
+        {canvasBlank && total > 0 && (
+          <span className="text-[11px] font-mono font-bold text-slate-500 tabular-nums">{total} {t('頁', language)}</span>
+        )}
         <div className={`flex items-center gap-1 ${canvasBlank ? 'hidden' : ''}`}>
           <button onClick={() => setPageNum(n => Math.max(1, n - 1))} disabled={pageNum <= 1 || !doc}
             className="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-slate-50 disabled:opacity-30 transition"><ChevronLeft size={18}/></button>
@@ -732,13 +738,28 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
           </div>
         )}
         {canvasBlank ? (
-          <div className="w-full h-full flex flex-col gap-2">
-            <iframe src={sheet.url} title={sheet.title || 'sheet'} className="flex-1 w-full border-0 rounded bg-white" />
-            <a href={sheet.url} target="_blank" rel="noopener noreferrer"
-               className="shrink-0 text-center py-2 bg-sky-500 hover:bg-sky-600 text-white text-sm font-bold rounded-xl shadow-md transition">
-              {t('看不到？點此用新分頁開啟', language)}
-            </a>
-          </div>
+          pageImages.length > 0 ? (
+            // 逐頁圖片：iOS 的內嵌 PDF 只顯示第一頁，圖片沒有這個限制，
+            // 而且原生捲動與雙指縮放都能直接用。
+            <div className="w-full flex flex-col items-center gap-3">
+              {pageImages.map((src, i) => (
+                <img key={i} src={src} alt={`${sheet.title || ''} p${i + 1}`} loading={i < 2 ? 'eager' : 'lazy'}
+                     className="w-full max-w-full h-auto shadow-lg bg-white rounded" />
+              ))}
+              <a href={sheet.url} target="_blank" rel="noopener noreferrer"
+                 className="w-full text-center py-2 mb-1 bg-white border border-slate-200 text-slate-500 text-xs font-bold rounded-xl transition">
+                {t('用新分頁開啟原始 PDF', language)}
+              </a>
+            </div>
+          ) : (
+            <div className="w-full h-full flex flex-col gap-2">
+              <iframe src={sheet.url} title={sheet.title || 'sheet'} className="flex-1 w-full border-0 rounded bg-white" />
+              <a href={sheet.url} target="_blank" rel="noopener noreferrer"
+                 className="shrink-0 text-center py-2 bg-sky-500 hover:bg-sky-600 text-white text-sm font-bold rounded-xl shadow-md transition">
+                {t('看不到？點此用新分頁開啟', language)}
+              </a>
+            </div>
+          )
         ) : (
           <canvas ref={canvasRef} className={`shadow-lg bg-white rounded ${status === 'ready' ? '' : 'hidden'}`} />
         )}
