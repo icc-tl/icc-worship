@@ -1591,12 +1591,17 @@ export default function App() {
       }
       const niceName = [opts.title || customTitle || '樂譜', opts.key || null, opts.label || null]
         .filter(Boolean).join('_');
-      const { uploadUrl, key, publicUrl } = await callSheetApi({
+      const { uploadUrl, uploadHeaders, key, publicUrl } = await callSheetApi({
         action: 'upload', contentType: payload.type, size: payload.size, filename: niceName,
       });
       let put;
       try {
-        put = await fetch(uploadUrl, { method: 'PUT', body: payload, headers: { 'Content-Type': payload.type } });
+        // 必須送出伺服器簽章時使用的同一組標頭，少一個都會被拒絕
+        put = await fetch(uploadUrl, {
+          method: 'PUT',
+          body: payload,
+          headers: uploadHeaders || { 'Content-Type': payload.type },
+        });
       } catch (e) {
         // 幾乎都是 R2 的 CORS 沒開 PUT，或設定還沒傳播完成
         throw new Error(`${t('步驟3 上傳到雲端失敗（多為 R2 的 CORS 設定）', language)}：${e.message}`);

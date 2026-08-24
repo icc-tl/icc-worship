@@ -83,16 +83,27 @@ export default async function handler(req, res) {
       const asciiName = withExt.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '');
       const disposition = `inline; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(withExt)}`;
 
+      // 這些標頭會被納入簽章，上傳時必須原封不動一起送出，
+      // 否則 R2 會以簽章不符拒絕（而且錯誤回應不帶 CORS 標頭，
+      // 瀏覽器只會顯示 "Failed to fetch"，看不出真正原因）。
+      const cacheControl = 'public, max-age=31536000, immutable';
+      const uploadHeaders = {
+        'Content-Type': contentType,
+        'Content-Disposition': disposition,
+        'Cache-Control': cacheControl,
+      };
+
       const url = await getSignedUrl(s3(), new PutObjectCommand({
         Bucket: bucket,
         Key: objectKey,
         ContentType: contentType,
         ContentDisposition: disposition,
-        CacheControl: 'public, max-age=31536000, immutable',
+        CacheControl: cacheControl,
       }), { expiresIn: 300 });
 
       return res.status(200).json({
         uploadUrl: url,
+        uploadHeaders,
         key: objectKey,
         publicUrl: `${process.env.R2_PUBLIC_URL.replace(/\/$/, '')}/${objectKey}`,
       });
