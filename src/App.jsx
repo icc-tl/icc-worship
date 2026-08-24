@@ -22,6 +22,10 @@ const TRANSLATIONS = {
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
   "登出": "Sign Out",
+  "歌詞": "Lyrics",
+  "歌曲與歌詞會被移除，無法復原。關聯的樂譜不會被刪除，會回到待用樂譜庫，日後仍可重新掛到別首歌。": "The song and its lyrics are removed for good. Its sheets are not deleted — they return to the pool and can be attached to another song later.",
+  "刪除這首詩歌？": "Delete this song?",
+  "取消中...": "Cancelling…",
   "寬度": "Fit width",
   "整頁": "Fit page",
   "檢查中": "Checking…",
@@ -1576,6 +1580,7 @@ export default function App() {
 
   const openManualEntry = (songToEdit = null, initialTitle = '', source = 'manage') => {
     setManualSource(source);
+    setAutoCreatedSongId(null);
     setSaveError('');
     setHasUnsavedChanges(false);
     
@@ -1650,6 +1655,7 @@ export default function App() {
       await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', sid), ns);
       
       setHasUnsavedChanges(false);
+      setAutoCreatedSongId(null);   // 已正式儲存，取消不該再刪它
       
       if (manualSource === 'editor') { setCurrentSong(ns); setSearchQuery(ns.title); setView('editor'); } 
       else { setView('manage'); }
@@ -1792,6 +1798,7 @@ export default function App() {
     };
     await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', sid), ns);
     setEditingDbSongId(sid);
+    setAutoCreatedSongId(sid);   // 按取消時要能還原
     return sid;
   };
 
@@ -1955,7 +1962,49 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, editingDbSongId, songsDb]);
 
-  const executeDeleteDbSong = async (id) => { if (!user) return; await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', id)); setDeleteConfirmId(null); };
+  // 刪除歌曲前先把它的樂譜送回待用庫。
+  // 樂譜檔案本身留在 R2，若隨歌曲一起消失就再也找不回來了。
+  const releaseSheetsToPool = async (songId) => {
+    let song;
+    try { song = await fetchSong(songId); } catch { return 0; }
+    const sheets = song?.sheets || [];
+    if (!sheets.length) return 0;
+    const keep = sheets.filter(sh => !sheetPool.some(x => x.id === sh.id));
+    if (keep.length) await writePool([...sheetPool, ...keep]);
+    return keep.length;
+  };
+
+  const executeDeleteDbSong = async (id) => {
+    if (!user) return;
+    try {
+      await releaseSheetsToPool(id);
+      await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', id));
+    } catch (e) {
+      setSaveError(String(e.message));
+    } finally {
+      setDeleteConfirmId(null);
+    }
+  };
+
+  // 新增詩歌時，一旦上傳或加入樂譜就會先把歌建起來（否則樂譜無處可掛）。
+  // 使用者按取消時要把那首半成品連同關聯一併還原，不能留下孤兒。
+  const [autoCreatedSongId, setAutoCreatedSongId] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleCancelManual = async () => {
+    if (!autoCreatedSongId) { setView(manualSource); return; }
+    setCancelling(true);
+    try {
+      await releaseSheetsToPool(autoCreatedSongId);
+      await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', autoCreatedSongId));
+    } catch (e) {
+      console.error('Cancel cleanup error:', e);
+    } finally {
+      setAutoCreatedSongId(null);
+      setCancelling(false);
+      setView(manualSource);
+    }
+  };
 
   // --- JSON Import Logic ---
   const handleImportSubmit = async () => {
@@ -2777,7 +2826,7 @@ export default function App() {
 
       {view === 'manual' && (
         <div className="pb-20 max-w-4xl mx-auto p-4 sm:p-8 pt-4 w-full">
-          <header className="mb-6 sm:mb-8 border-b pb-4 sm:pb-6 flex justify-between items-center"><button onClick={() => setView(manualSource)} className="flex items-center gap-1 sm:gap-2 text-slate-500 transition hover:text-slate-900 font-medium text-sm sm:text-base"><ChevronLeft size={18}/> {t('返回', language)}</button><div className="font-serif tracking-widest font-bold uppercase text-slate-700 text-xs sm:text-sm">{t('詩歌編輯器', language)}</div></header>
+          <header className="mb-6 sm:mb-8 border-b pb-4 sm:pb-6 flex justify-between items-center"><button onClick={handleCancelManual} disabled={cancelling} className="flex items-center gap-1 sm:gap-2 text-slate-500 transition hover:text-slate-900 font-medium text-sm sm:text-base disabled:opacity-50">{cancelling ? <Loader2 size={18} className="animate-spin"/> : <ChevronLeft size={18}/>} {t('返回', language)}</button><div className="font-serif tracking-widest font-bold uppercase text-slate-700 text-xs sm:text-sm">{t('詩歌編輯器', language)}</div></header>
           <div className="bg-white border rounded-2xl p-5 sm:p-8 shadow-sm">
             <h2 className="text-xl sm:text-2xl font-serif font-bold text-slate-900 mb-6 sm:mb-8 flex items-center gap-2">{editingDbSongId ? t('編輯詩歌檔案', language) : t('新增詩歌資料庫', language)}</h2>
             
@@ -2856,11 +2905,14 @@ export default function App() {
               const song = songsDb.find(x => x.id === editingDbSongId);
               const mySheets = song?.sheets || [];
               return (
-                <div className="mb-8 sm:mb-10">
-                  <div className="flex flex-wrap justify-between items-end border-b pb-2 mb-5 gap-2">
-                    <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest">
-                      <FileText size={14} className="text-[#C4A977]"/> {t('樂譜管理', language)}
-                      <span className="text-slate-300 normal-case tracking-normal font-medium">{mySheets.length} {t('份', language)}</span>
+                <section className="mb-8 sm:mb-10 bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5">
+                  <div className="flex flex-wrap justify-between items-center pb-3 mb-4 border-b border-slate-200 gap-2">
+                    <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                      <span className="w-7 h-7 rounded-lg bg-[#C4A977]/15 flex items-center justify-center shrink-0">
+                        <FileText size={15} className="text-[#C4A977]"/>
+                      </span>
+                      {t('樂譜', language)}
+                      <span className="text-slate-400 font-medium text-xs">{mySheets.length} {t('份', language)}</span>
                     </h3>
                     <div className="flex gap-2">
                       <label className={`text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer ${uploadingSheet ? 'bg-slate-100 text-slate-400' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
@@ -2939,12 +2991,20 @@ export default function App() {
                   <p className="text-[11px] text-slate-400 mt-3 leading-relaxed">
                     {t('調性與註記改完點擊別處即自動儲存。移除只是取消關聯，樂譜會回到待用庫，隨時能重新加入或改掛到別首歌。', language)}
                   </p>
-                </div>
+                </section>
               );
             })()}
 
-            <div className="mb-8 sm:mb-10">
-              <div className="flex justify-between items-end border-b pb-2 mb-6 sm:mb-8"><h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest">{t('歌詞段落管理', language)}</h3></div>
+            <section className="mb-8 sm:mb-10 bg-white border border-slate-200 rounded-2xl p-4 sm:p-5">
+              <div className="flex flex-wrap justify-between items-center pb-3 mb-5 border-b border-slate-200 gap-2">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-lg bg-sky-50 flex items-center justify-center shrink-0">
+                    <BookOpen size={15} className="text-sky-500"/>
+                  </span>
+                  {t('歌詞', language)}
+                  <span className="text-slate-400 font-medium text-xs">{customLyrics.filter(l => l.text?.trim()).length} {t('段', language)}</span>
+                </h3>
+              </div>
               <div className="space-y-4 sm:space-y-6">
                 {customLyrics.map((l, i) => (
                   <div key={i} className="flex flex-col sm:flex-row gap-3 sm:gap-5 items-start group transition hover:bg-slate-50/50 p-3 rounded-xl border border-transparent hover:border-slate-100">
@@ -2958,16 +3018,22 @@ export default function App() {
                   </div>
                 ))}
               </div>
-              <button onClick={() => setCustomLyrics([...customLyrics, { section: 'V', text: '' }])} className="mt-6 sm:mt-8 flex items-center gap-1.5 text-xs font-bold uppercase text-sky-600 transition hover:text-sky-500 bg-sky-50 px-4 py-2 rounded-lg w-fit">{t('+ 新增段落', language)}</button>
-            </div>
-            <div className="flex justify-end pt-6 sm:pt-8 border-t"><button onClick={handleSaveCustomSong} disabled={!customTitle.trim() || (editingDbSongId && !hasUnsavedChanges) || isSaving} className="w-full sm:w-auto px-8 sm:px-12 py-3.5 sm:py-4 bg-sky-500 hover:bg-sky-600 text-white font-serif rounded-xl shadow-xl transition active:scale-95 disabled:opacity-30 tracking-widest font-bold text-sm sm:text-base">{isSaving ? t('儲存中...', language) : (editingDbSongId ? t('確認儲存更新', language) : t('確認儲存至雲端資料庫', language))}</button></div>
+              <button onClick={() => setCustomLyrics([...customLyrics, { section: 'V', text: '' }])} className="mt-6 flex items-center gap-1.5 text-xs font-bold uppercase text-sky-600 transition hover:text-sky-500 bg-sky-50 px-4 py-2 rounded-lg w-fit">{t('+ 新增段落', language)}</button>
+            </section>
+            <div className="flex flex-col sm:flex-row sm:justify-end gap-3 pt-6 sm:pt-8 border-t">
+              <button onClick={handleCancelManual} disabled={cancelling}
+                className="w-full sm:w-auto px-6 py-3.5 sm:py-4 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl font-bold text-sm sm:text-base transition disabled:opacity-50 flex items-center justify-center gap-2">
+                {cancelling && <Loader2 size={16} className="animate-spin"/>}
+                {cancelling ? t('取消中...', language) : t('取消', language)}
+              </button>
+              <button onClick={handleSaveCustomSong} disabled={!customTitle.trim() || (editingDbSongId && !hasUnsavedChanges) || isSaving} className="w-full sm:w-auto px-8 sm:px-12 py-3.5 sm:py-4 bg-sky-500 hover:bg-sky-600 text-white font-serif rounded-xl shadow-xl transition active:scale-95 disabled:opacity-30 tracking-widest font-bold text-sm sm:text-base">{isSaving ? t('儲存中...', language) : (editingDbSongId ? t('確認儲存更新', language) : t('確認儲存至雲端資料庫', language))}</button></div>
           </div>
         </div>
       )}
 
       {view === 'manage' && (
         <div className="pb-20 max-w-6xl mx-auto p-4 sm:p-8 pt-4 w-full">
-          <ConfirmModal isOpen={deleteConfirmId !== null} title={t('永久刪除？', language)} message={t('此動作將移除雲端檔案，無法復原。', language)} cancelText={t('取消', language)} confirmText={t('確認刪除', language)} onCancel={() => setDeleteConfirmId(null)} onConfirm={() => executeDeleteDbSong(deleteConfirmId)} />
+          <ConfirmModal isOpen={deleteConfirmId !== null} title={t('刪除這首詩歌？', language)} message={t('歌曲與歌詞會被移除，無法復原。關聯的樂譜不會被刪除，會回到待用樂譜庫，日後仍可重新掛到別首歌。', language)} cancelText={t('取消', language)} confirmText={t('確認刪除', language)} onCancel={() => setDeleteConfirmId(null)} onConfirm={() => executeDeleteDbSong(deleteConfirmId)} />
           <header className="mb-6 sm:mb-8 border-b pb-4 sm:pb-6 flex justify-between items-center">
             <button onClick={() => setView('home')} className="flex items-center gap-1 sm:gap-2 text-slate-500 hover:text-slate-900 transition font-medium text-sm sm:text-base"><ChevronLeft size={18}/> {t('返回', language)}</button>
             <div className="font-serif tracking-widest text-slate-900 uppercase font-bold flex items-center gap-1 sm:gap-2 text-xs sm:text-base">
