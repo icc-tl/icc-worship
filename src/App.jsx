@@ -22,6 +22,7 @@ const TRANSLATIONS = {
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
   "登出": "Sign Out",
+  "看不到？點此用新分頁開啟": "Can't see it? Open in a new tab",
   "已切換為瀏覽器內建顯示": "Using the browser's built-in viewer",
   "已合併，但這些歌沒有可用樂譜：": "Merged, but these songs had no sheet: ",
   "沒有可合併的樂譜": "No sheets available to merge",
@@ -511,6 +512,7 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
   const [zoom, setZoom] = useState(1);
   const [wrapWidth, setWrapWidth] = useState(0);
   const [canvasBlank, setCanvasBlank] = useState(false);
+  const [rendered, setRendered] = useState(false);
   const canvasRef = useRef(null);
   const renderTaskRef = useRef(null);
 
@@ -584,7 +586,15 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
       const ctx = canvas.getContext('2d');
       const task = page.render({ canvasContext: ctx, viewport });
       renderTaskRef.current = task;
-      try { await task.promise; } catch { return; /* 換頁時被取消 */ }
+      try {
+        await task.promise;
+      } catch (err) {
+        // 換頁造成的取消才是預期內；其他失敗（記憶體不足、canvas 建立失敗等）
+        // 先前被一併吞掉，導致畫面空白卻不會降級。
+        if (err?.name === 'RenderingCancelledException' || cancelled) return;
+        setCanvasBlank(true);
+        return;
+      }
       if (cancelled) return;
 
       // iOS 在 canvas 過大時不會報錯，而是靜靜地畫出一片空白。
@@ -607,6 +617,8 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
         } catch { return false; }   // 無法檢查時當作正常，不要誤判
       })();
 
+      if (!blank) setRendered(true);
+
       if (blank && drawScale > cssScale * 0.4) {
         // 退路同樣要壓在上限內，否則等於繞過保護
         const smaller = page.getViewport({ scale: safeScale(base.width, base.height, cssScale * 0.6) });
@@ -624,6 +636,15 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
 
     return () => { cancelled = true; };
   }, [doc, pageNum, zoom, wrapWidth]);
+
+  // 看門狗：某些裝置上 PDF.js 會卡住或畫出空白卻不報錯。
+  // 一段時間內沒有確認畫出內容，就直接改用瀏覽器內建顯示，
+  // 至少保證看得到譜，而不是停在一片空白。
+  useEffect(() => {
+    if (!sheet?.url || canvasBlank || rendered) return;
+    const timer = setTimeout(() => setCanvasBlank(true), 6000);
+    return () => clearTimeout(timer);
+  }, [sheet?.url, canvasBlank, rendered]);
 
   // 監看容器寬度：iOS 首次量到 0、或使用者轉向時，都要重畫
   useEffect(() => {
@@ -696,7 +717,13 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
           </div>
         )}
         {canvasBlank ? (
-          <iframe src={sheet.url} title={sheet.title || 'sheet'} className="w-full h-full border-0 rounded bg-white" />
+          <div className="w-full h-full flex flex-col gap-2">
+            <iframe src={sheet.url} title={sheet.title || 'sheet'} className="flex-1 w-full border-0 rounded bg-white" />
+            <a href={sheet.url} target="_blank" rel="noopener noreferrer"
+               className="shrink-0 text-center py-2 bg-sky-500 hover:bg-sky-600 text-white text-sm font-bold rounded-xl shadow-md transition">
+              {t('看不到？點此用新分頁開啟', language)}
+            </a>
+          </div>
         ) : (
           <canvas ref={canvasRef} className={`shadow-lg bg-white rounded ${status === 'ready' ? '' : 'hidden'}`} />
         )}
