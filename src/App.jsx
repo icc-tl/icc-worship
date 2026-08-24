@@ -510,8 +510,14 @@ const safeScale = (baseW, baseH, wanted) => {
 const prefersNativeViewer = (() => {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
-  return /iPad|iPhone|iPod/.test(ua) ||
-         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  // iOS 上的所有瀏覽器底層都是 WebKit，包含 Chrome(CriOS)、Firefox(FxiOS)、Edge(EdgiOS)
+  if (/iPad|iPhone|iPod|CriOS|FxiOS|EdgiOS/.test(ua)) return true;
+  // iPadOS 預設以「桌面版網站」身分出現，UA 看起來就是 Mac。
+  // navigator.platform 已被棄用、可能是空字串，所以改用「Mac + 有觸控」判斷 ——
+  // 真正的 Mac 沒有觸控螢幕。
+  const touch = navigator.maxTouchPoints || 0;
+  if (touch > 1 && (/Mac/.test(ua) || navigator.platform === 'MacIntel')) return true;
+  return false;
 })();
 
 const SheetViewer = ({ sheet, language, height = '75vh' }) => {
@@ -693,9 +699,6 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
           <button onClick={() => setPageNum(n => Math.min(total, n + 1))} disabled={pageNum >= total || !doc}
             className="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-slate-50 disabled:opacity-30 transition"><ChevronRight size={18}/></button>
         </div>
-        {canvasBlank && !prefersNativeViewer && (
-          <span className="text-[11px] text-slate-500 font-medium">{t('已切換為瀏覽器內建顯示', language)}</span>
-        )}
         <div className={`flex items-center gap-1 ${canvasBlank ? 'ml-auto' : ''}`}>
           <button onClick={() => setZoom(z => Math.max(0.5, +(z - 0.25).toFixed(2)))} disabled={zoom <= 0.5}
             style={canvasBlank ? { display: 'none' } : undefined}
