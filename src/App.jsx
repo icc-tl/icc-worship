@@ -22,6 +22,12 @@ const TRANSLATIONS = {
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
   "登出": "Sign Out",
+  "共": "",
+  "點選要給樂手看的那一份（已依調性預選）": "Pick the one musicians should see (pre-selected by key)",
+  "就是這首": "That\u2019s it",
+  "並上傳建檔": " and upload it",
+  "上網搜尋": "search online",
+  "待用庫查無符合的樂譜，請協助": "No matching sheet in the pool — please ",
   "頁": "pages",
   "用新分頁開啟原始 PDF": "Open the original PDF in a new tab",
   "看不到？點此用新分頁開啟": "Can't see it? Open in a new tab",
@@ -163,6 +169,7 @@ const TRANSLATIONS = {
   "資料庫尚未連線，請稍後再試。": "Database not connected. Please try again later.",
   "儲存至雲端時發生錯誤：": "Error saving to cloud: ",
   "歌名 *": "Song Title *",
+  "歌名": "Song Title",
   "歌手 / 出處": "Artist / Source",
   "預設調性": "Default Key",
   "YouTube 連結或 ID": "YouTube URL or ID",
@@ -348,6 +355,13 @@ const imageFileToPdf = async (file) => {
 // 完全看不出是哪首歌。這種排到清單最後，並標示出來提醒需要開啟確認。
 const UNNAMED_RE = /^(img[_-]?\d|photo\s|screen\s*shot|screenshot|untitled|scan\b|document\b)/i;
 const SETLIST_DOC_RE = /song\s*map|worship\s*set/i;
+
+// 與匯入腳本相同的正規化原則：去標點空白、你/祢 統一、大小寫統一
+const normForMatch = (str) => String(str || '')
+  .normalize('NFKC')
+  .replace(/[祢袮妳]/g, '你')
+  .replace(/[\s_\-（）()【】[\]{}、,，。.!！?？~～:：;；'"`]/g, '')
+  .toLowerCase();
 
 const poolRank = (sheet) => {
   const t = String(sheet.title || '');
@@ -794,6 +808,8 @@ export default function App() {
   const [sheetPool, setSheetPool] = useState([]);
   const [activeSheetSong, setActiveSheetSong] = useState(0);
   const [activeSheetId, setActiveSheetId] = useState(null);
+  // 訪客沒有寫入權限，選擇只存在自己裝置上；主領的選擇才寫回歌單
+  const [localPicks, setLocalPicks] = useState({});
   const [showSongMap, setShowSongMap] = useState(false);
   const [mergingPdf, setMergingPdf] = useState(false);
   const [mergeError, setMergeError] = useState('');
@@ -835,6 +851,7 @@ export default function App() {
   const [currentSong, setCurrentSong] = useState(null);
   const [currentKey, setCurrentKey] = useState('C');
   const [currentMap, setCurrentMap] = useState('');
+  const [currentSheetId, setCurrentSheetId] = useState(null);
 
   // --- Manual Entry State ---
   const [editingDbSongId, setEditingDbSongId] = useState(null); 
@@ -1016,6 +1033,40 @@ export default function App() {
   const handleSetlistChange = (newSetlist) => {
     setSetlist(newSetlist);
     setHasSetlistChanges(true);
+  };
+
+  // 決定一首歌要顯示哪份樂譜。
+  // 優先序：這台裝置上的選擇 > 歌單裡記下的選擇 > 依調性自動配對
+  const resolveSheet = useCallback((item) => {
+    const sheets = songsDb.find(d => d.id === item?.songId)?.sheets || [];
+    if (sheets.length === 0) return null;
+    const wanted = localPicks[item.id] || item.sheetId;
+    return sheets.find(x => x.id === wanted) || pickSheetForKey(sheets, item.key);
+  }, [songsDb, localPicks]);
+
+  // 記住某首歌選定的樂譜
+  const pickSheetForSong = async (itemId, sheetId) => {
+    if (isAdmin) {
+      const next = setlist.map(x => x.id === itemId ? { ...x, sheetId } : x);
+      setSetlist(next);
+      if (currentSetlistId && user) {
+        try {
+          await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', currentSetlistId), {
+            id: currentSetlistId, date: meta.date, wl: meta.wl,
+            youtubePlaylistUrl: meta.youtubePlaylistUrl || '',
+            songs: next, updatedAt: new Date().toISOString(),
+          }, { merge: true });
+        } catch (e) { console.error('Save sheet pick error:', e); }
+      }
+      setLocalPicks(prev => { const n = { ...prev }; delete n[itemId]; return n; });
+    } else {
+      // 訪客：記在自己的瀏覽器，不動到共用的歌單
+      setLocalPicks(prev => {
+        const next = { ...prev, [itemId]: sheetId };
+        try { localStorage.setItem(`iccSheetPicks:${currentSetlistId}`, JSON.stringify(next)); } catch { /* 無痕模式等情況忽略 */ }
+        return next;
+      });
+    }
   };
 
   const requireAdmin = (cb) => {
@@ -1220,8 +1271,14 @@ export default function App() {
     try { await deleteDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', id)); } finally { setDeleteSetlistConfirmId(null); }
   };
 
+  const loadLocalPicks = (setlistId) => {
+    try { setLocalPicks(JSON.parse(localStorage.getItem(`iccSheetPicks:${setlistId}`) || '{}')); }
+    catch { setLocalPicks({}); }
+  };
+
   const openSetlist = (obj) => { 
     setCurrentSetlistId(obj.id); 
+    loadLocalPicks(obj.id);
     setMeta({ date: obj.date, wl: obj.wl, youtubePlaylistUrl: obj.youtubePlaylistUrl || '' }); 
     setSetlist(obj.songs || []); 
     setHasSetlistChanges(false);
@@ -1238,11 +1295,13 @@ export default function App() {
       setCurrentSong(dbSong || { id: item.songId, title: item.title, lyrics: item.lyrics, hasMultitrack: item.hasMultitrack });
       setCurrentKey(item.key || 'C');
       setCurrentMap(item.mapString || '');
+      setCurrentSheetId(item.sheetId || null);
       setSearchQuery(item.title || '');
     } else {
       setCurrentSong(null);
       setCurrentKey('C');
       setCurrentMap('');
+      setCurrentSheetId(null);
       setSearchQuery('');
     }
     setView('editor');
@@ -1282,6 +1341,8 @@ export default function App() {
   const handleSelectSong = (song) => { 
     setCurrentSong(song); 
     setCurrentKey(song.defaultKey || 'C'); 
+    // 依歌曲預設調性先挑一份最合適的譜，主領可再改
+    setCurrentSheetId(pickSheetForKey(song.sheets, song.defaultKey)?.id || null);
     setCurrentMap(''); 
     setSearchQuery(song.title); 
     setShowDropdown(false); 
@@ -1292,8 +1353,8 @@ export default function App() {
   const saveToSetlist = () => {
     if (!currentSong) return;
     // 修復更新邏輯：確保加入或更新歌單時，把 currentSong 最新編輯過的 lyrics 快照一併存入
-    if (editingItem) handleSetlistChange(setlist.map(i => i.id === editingItem.id ? { ...i, key: currentKey, mapString: currentMap, lyrics: currentSong.lyrics } : i));
-    else handleSetlistChange([...setlist, { id: generateId(), songId: currentSong.id, title: currentSong.title, key: currentKey, mapString: currentMap, lyrics: currentSong.lyrics }]);
+    if (editingItem) handleSetlistChange(setlist.map(i => i.id === editingItem.id ? { ...i, key: currentKey, mapString: currentMap, sheetId: currentSheetId, lyrics: currentSong.lyrics } : i));
+    else handleSetlistChange([...setlist, { id: generateId(), songId: currentSong.id, title: currentSong.title, key: currentKey, mapString: currentMap, sheetId: currentSheetId, lyrics: currentSong.lyrics }]);
     setView('list');
   };
 
@@ -1564,8 +1625,7 @@ export default function App() {
       const missing = [];
 
       for (const item of setlist) {
-        const dbSong = songsDb.find(d => d.id === item.songId);
-        const sheet = pickSheetForKey(dbSong?.sheets, item.key);
+        const sheet = resolveSheet(item);
         if (!sheet) { missing.push(item.title); continue; }
         try {
           let res = await fetch(sheet.url);
@@ -1833,9 +1893,17 @@ export default function App() {
 
               <div className="flex-1 overflow-y-auto custom-scrollbar p-5 sm:p-6 pt-3">
                 {hits.length === 0 ? (
-                  <div className="text-center py-12 text-slate-400">
-                    <div className="text-3xl mb-2">🔍</div>
-                    <p className="text-sm">{t('待用庫查無符合的樂譜', language)}</p>
+                  <div className="text-center py-12 px-4">
+                    <div className="text-3xl mb-3">🔍</div>
+                    <p className="text-sm text-slate-500 leading-relaxed">
+                      {t('待用庫查無符合的樂譜，請協助', language)}
+                      <a href={`https://www.google.com/search?q=${encodeURIComponent((poolSearch || customTitle || '').trim() + ' 樂譜')}`}
+                         target="_blank" rel="noopener noreferrer"
+                         className="text-sky-600 font-bold underline underline-offset-2 hover:text-sky-700 mx-1">
+                        {t('上網搜尋', language)}
+                      </a>
+                      {t('並上傳建檔', language)}
+                    </p>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -2047,8 +2115,8 @@ export default function App() {
                           <button onClick={() => openPreviewFromHome(item)} className="w-full px-4 py-2 sm:py-2.5 bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex justify-center items-center gap-2">
                             <Eye size={16}/> {t('歌手預覽', language)}
                           </button>
-                          <button onClick={() => { setCurrentSetlistId(item.id); setMeta({ date: item.date, wl: item.wl, youtubePlaylistUrl: item.youtubePlaylistUrl || '' }); setSetlist(item.songs || []); setActiveSheetSong(0); setActiveSheetId(null); setView('sheets'); }}
-                            className="w-full px-4 py-2 sm:py-2.5 bg-[#C4A977] hover:bg-[#B39866] text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition flex justify-center items-center gap-2">
+                          <button onClick={() => { setCurrentSetlistId(item.id); setMeta({ date: item.date, wl: item.wl, youtubePlaylistUrl: item.youtubePlaylistUrl || '' }); setSetlist(item.songs || []); loadLocalPicks(item.id); setActiveSheetSong(0); setActiveSheetId(null); setView('sheets'); }}
+                            className="w-full px-4 py-2 sm:py-2.5 bg-slate-500 hover:bg-slate-600 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition flex justify-center items-center gap-2">
                             <FileText size={16}/> {t('樂手樂譜', language)}
                           </button>
                           <div className="flex items-center justify-between md:justify-end gap-2 w-full">
@@ -2151,8 +2219,17 @@ export default function App() {
                         {String(item.mapString || t('未設定段落', language))}
                       </div>
                       <div className="pl-8 sm:pl-9 mt-2">
-                        <SheetGroup sheets={songsDb.find(d => d.id === item.songId)?.sheets}
-                                    wantedKey={item.key} language={language} compact />
+                        {(() => {
+                          const sel = resolveSheet(item);
+                          const all = songsDb.find(d => d.id === item.songId)?.sheets || [];
+                          if (!sel) return <span className="text-[11px] text-slate-300 italic">{t('尚無樂譜', language)}</span>;
+                          return (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <SheetLink sheet={sel} wantedKey={item.key} language={language} compact />
+                              {all.length > 1 && <span className="text-[10px] text-slate-400">{t('共', language)}{all.length}{t('份', language)}</span>}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                     <div className="flex items-center justify-end gap-1.5 sm:gap-2 pt-2 sm:pt-0 border-t sm:border-0 border-slate-50 w-full sm:w-auto">
@@ -2234,21 +2311,33 @@ export default function App() {
                       </label>
                     </div>
                     {sheetError && <p className="text-[11px] text-red-600 font-bold mb-2">{sheetError}</p>}
-                    <div className="flex flex-wrap gap-1.5">
-                      {(currentSong.sheets || []).length === 0
-                        ? <span className="text-[11px] text-slate-400 italic">{t('這首歌還沒有樂譜', language)}</span>
-                        : (currentSong.sheets || []).map(sh => {
+                    {(currentSong.sheets || []).length === 0 ? (
+                      <span className="text-[11px] text-slate-400 italic">{t('這首歌還沒有樂譜', language)}</span>
+                    ) : (
+                      <>
+                        <p className="text-[11px] text-slate-500 mb-2">{t('點選要給樂手看的那一份（已依調性預選）', language)}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(currentSong.sheets || []).map(sh => {
                             const tone = sheetTone(sh, currentKey);
+                            const on = currentSheetId === sh.id;
                             return (
-                              <button key={sh.id} onClick={() => setPreviewSheet(sh)}
-                                className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition flex items-center gap-1.5 ${TONE_STYLES[tone].idle}`}>
-                                <FileText size={11}/>
-                                <span className="font-mono">{sh.key || t('未標調性', language)}</span>
-                                {sh.pageCount > 1 && <span className="opacity-60 font-normal">{sh.pageCount}p</span>}
-                              </button>
+                              <div key={sh.id} className="flex items-stretch">
+                                <button onClick={() => setCurrentSheetId(sh.id)}
+                                  className={`px-2.5 py-1 rounded-l-lg border border-r-0 text-[11px] font-bold transition flex items-center gap-1.5 ${on ? TONE_STYLES[tone].chip : TONE_STYLES[tone].idle}`}>
+                                  {on ? <Crown size={11} fill="currentColor"/> : <FileText size={11}/>}
+                                  <span className="font-mono">{sh.key || t('未標調性', language)}</span>
+                                  {sh.pageCount > 1 && <span className="opacity-70 font-normal">{sh.pageCount}p</span>}
+                                </button>
+                                <button onClick={() => setPreviewSheet(sh)}
+                                  className={`px-1.5 rounded-r-lg border text-[11px] transition ${on ? TONE_STYLES[tone].chip : TONE_STYLES[tone].idle}`}>
+                                  <Eye size={11}/>
+                                </button>
+                              </div>
                             );
                           })}
-                    </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                   <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-400 mb-3 sm:mb-4 border-b pb-2 uppercase tracking-widest">{t('歌詞預覽', language)}</h3>
                   <div className="space-y-4 sm:space-y-6 max-h-[350px] sm:max-h-[450px] overflow-y-auto pr-2 custom-scrollbar">
@@ -2372,6 +2461,45 @@ export default function App() {
                 </label>
               </div>
             </div>
+
+            {/* 歌名一輸入就比對待用庫，讓主領不用自己想到要去翻 */}
+            {!editingDbSongId && (() => {
+              const q = normForMatch(customTitle);
+              if (q.length < 2) return null;
+              const cands = sheetPool.filter(x => {
+                const n = normForMatch(x.title);
+                return n && (n === q || n.includes(q) || q.includes(n));
+              }).slice(0, 6);
+              if (cands.length === 0) return null;
+              return (
+                <div className="mb-6 p-4 bg-sky-50 border border-sky-200 rounded-xl">
+                  <p className="text-[13px] font-bold text-sky-800 mb-2.5 flex items-center gap-1.5">
+                    <Sparkles size={15} className="text-sky-500"/>
+                    {language === 'en'
+                      ? `Found ${cands.length} sheet(s) in the pool that may be this song`
+                      : `待用庫裡有 ${cands.length} 份樂譜可能是這首歌`}
+                  </p>
+                  <div className="space-y-1.5">
+                    {cands.map(sh => (
+                      <div key={sh.id} className="flex items-center gap-2 bg-white border border-sky-100 rounded-lg px-2.5 py-1.5">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[12px] font-bold text-slate-800 truncate">{sh.title}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">{sheetLabel(sh, language) || '—'}</div>
+                        </div>
+                        <button onClick={() => setPreviewSheet(sh)}
+                          className="shrink-0 p-1.5 text-slate-400 hover:text-sky-600 rounded transition"><Eye size={14}/></button>
+                        <button onClick={async () => { const id = await ensureSongSaved().catch(e => { setSheetError(String(e.message)); return null; }); if (id) attachSheet(id, sh); }}
+                          disabled={sheetBusy === sh.id}
+                          className="shrink-0 px-2.5 py-1 bg-sky-500 hover:bg-sky-600 text-white text-[11px] font-bold rounded-lg transition disabled:opacity-50 flex items-center gap-1">
+                          {sheetBusy === sh.id ? <Loader2 size={12} className="animate-spin"/> : <Plus size={12}/>}
+                          {t('就是這首', language)}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ---- 樂譜管理 ---- */}
             {(() => {
@@ -2516,7 +2644,7 @@ export default function App() {
             <table className="w-full text-left min-w-[600px]">
               <thead>
                 <tr className="bg-slate-50 border-b text-slate-500 text-[9px] sm:text-[10px] uppercase tracking-widest font-bold">
-                  <th className="p-3 sm:p-4">{t('歌名 (Song Title)', language)}</th>
+                  <th className="p-3 sm:p-4">{t('歌名', language)}</th>
                   <th className="p-3 sm:p-4">{t('歌手 / 出處', language)}</th>
                   <th className="p-3 sm:p-4">{t('近期熱度', language)}</th>
                   <th className="p-3 sm:p-4">{t('樂譜', language)}</th>
@@ -2565,10 +2693,11 @@ export default function App() {
                       ) : (
                         <div className="flex flex-wrap gap-1 items-center max-w-[190px]">
                           {(s.sheets || []).slice(0, 5).map(sh => (
-                            <span key={sh.id}
-                              className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-bold border ${sh.key ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                            <button key={sh.id} onClick={() => setPreviewSheet(sh)}
+                              className={`relative group/tt px-1.5 py-0.5 rounded font-mono text-[10px] font-bold border transition hover:ring-2 hover:ring-sky-300 ${sh.key ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
                               {sh.key || '—'}
-                            </span>
+                              <FastTooltip text={`${t('預覽', language)}${sh.pageCount > 1 ? ` · ${sh.pageCount} ${t('頁', language)}` : ''}`} />
+                            </button>
                           ))}
                           {(s.sheets || []).length > 5 && <span className="text-[10px] text-slate-400 font-bold">+{(s.sheets || []).length - 5}</span>}
                         </div>
@@ -2610,7 +2739,7 @@ export default function App() {
         const active = setlist[activeSheetSong] || setlist[0];
         const dbSong = active ? songsDb.find(d => d.id === active.songId) : null;
         const sheets = dbSong?.sheets || [];
-        const chosen = sheets.find(x => x.id === activeSheetId) || pickSheetForKey(sheets, active?.key);
+        const chosen = (activeSheetId && sheets.find(x => x.id === activeSheetId)) || resolveSheet(active) || pickSheetForKey(sheets, active?.key);
         return (
           <div className="fixed inset-x-0 top-0 flex flex-col bg-[#FAFAFA] z-[60] overflow-hidden"
                /* iOS 的網址列會伸縮，inset-0 算出來的高度可能是錯的或為 0。
@@ -2690,8 +2819,9 @@ export default function App() {
                       const tone = sheetTone(sh, active?.key);
                       const on = chosen?.id === sh.id;
                       return (
-                        <button key={sh.id} onClick={() => setActiveSheetId(sh.id)}
+                        <button key={sh.id} onClick={() => { setActiveSheetId(sh.id); pickSheetForSong(active.id, sh.id); }}
                           className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition flex items-center gap-1.5 ${on ? TONE_STYLES[tone].chip : TONE_STYLES[tone].idle}`}>
+                          {on && <Crown size={10} fill="currentColor"/>}
                           <span className="font-mono">{sh.key || t('未標調性', language)}</span>
                           {sh.pageCount > 1 && <span className="opacity-70 font-normal">{sh.pageCount}p</span>}
                           {sh.label && <span className="opacity-70 font-normal max-w-[70px] truncate">{sh.label}</span>}
