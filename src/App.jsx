@@ -22,6 +22,11 @@ const TRANSLATIONS = {
   "確認解鎖": "Unlock",
   "密碼錯誤。": "Incorrect password.",
   "登出": "Sign Out",
+  "步驟4 寫入資料庫失敗": "Step 4 could not save to the database",
+  "步驟3 雲端拒絕上傳": "Step 3 storage rejected the upload",
+  "步驟3 上傳到雲端失敗（多為 R2 的 CORS 設定）": "Step 3 upload to storage failed (usually the R2 CORS policy)",
+  "步驟2 連線伺服器失敗": "Step 2 could not reach the server",
+  "步驟1 取得登入憑證失敗": "Step 1 could not get your sign-in token",
   "共": "",
   "點選要給樂手看的那一份（已依調性預選）": "Pick the one musicians should see (pre-selected by key)",
   "就是這首": "That\u2019s it",
@@ -1530,13 +1535,23 @@ export default function App() {
   const [previewSheet, setPreviewSheet] = useState(null);
 
   const callSheetApi = async (payload) => {
-    const token = await firebaseAuth.currentUser?.getIdToken();
+    let token;
+    try {
+      token = await firebaseAuth.currentUser?.getIdToken();
+    } catch (e) {
+      throw new Error(`${t('步驟1 取得登入憑證失敗', language)}：${e.message}`);
+    }
     if (!token) throw new Error(t('請先登入主領帳號', language));
-    const r = await fetch('/api/sheet', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(payload),
-    });
+    let r;
+    try {
+      r = await fetch('/api/sheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      throw new Error(`${t('步驟2 連線伺服器失敗', language)}：${e.message}`);
+    }
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
       // 把伺服器回傳的細節一起帶出來，否則畫面上只看到一句「處理失敗」無從判斷
@@ -1579,8 +1594,14 @@ export default function App() {
       const { uploadUrl, key, publicUrl } = await callSheetApi({
         action: 'upload', contentType: payload.type, size: payload.size, filename: niceName,
       });
-      const put = await fetch(uploadUrl, { method: 'PUT', body: payload, headers: { 'Content-Type': payload.type } });
-      if (!put.ok) throw new Error(t('檔案上傳失敗，請再試一次。', language));
+      let put;
+      try {
+        put = await fetch(uploadUrl, { method: 'PUT', body: payload, headers: { 'Content-Type': payload.type } });
+      } catch (e) {
+        // 幾乎都是 R2 的 CORS 沒開 PUT，或設定還沒傳播完成
+        throw new Error(`${t('步驟3 上傳到雲端失敗（多為 R2 的 CORS 設定）', language)}：${e.message}`);
+      }
+      if (!put.ok) throw new Error(`${t('步驟3 雲端拒絕上傳', language)}：HTTP ${put.status}`);
 
       const fresh = songsDb.find(x => x.id === songId);
       const sheet = {
@@ -1593,8 +1614,12 @@ export default function App() {
       };
       const song = songsDb.find(x => x.id === songId);
       const cur = song?.sheets || [];
-      await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', songId),
-                   { ...(song || { id: songId }), sheets: [...cur, sheet] }, { merge: true });
+      try {
+        await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_songs', songId),
+                     { ...(song || { id: songId }), sheets: [...cur, sheet] }, { merge: true });
+      } catch (e) {
+        throw new Error(`${t('步驟4 寫入資料庫失敗', language)}：${e.message}`);
+      }
     } catch (e) {
       setSheetError(String(e.message));
     } finally {
