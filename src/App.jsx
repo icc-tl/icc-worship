@@ -2437,7 +2437,8 @@ export default function App() {
               <Code size={12}/> {t('貼上 JSON 匯入歌單', language)}
             </button>
             
-            <button onClick={() => requireAdmin(() => setView('manage'))} className="hover:text-sky-600 transition flex items-center gap-1"><Database size={12}/> {t('雲端詩歌庫', language)}</button>
+            {/* 瀏覽開放給所有人；列表內的編輯、刪除、新增仍走 requireAdmin */}
+            <button onClick={() => setView('manage')} className="hover:text-sky-600 transition flex items-center gap-1"><Database size={12}/> {t('雲端詩歌庫', language)}</button>
           </div>
         </div>
       )}
@@ -3106,7 +3107,13 @@ export default function App() {
                             <Crown size={10} fill="currentColor" /> {t('近期熱門', language)}
                           </span>
                         )}
-                        <span className="font-serif font-bold text-slate-800 text-sm sm:text-lg group-hover:text-sky-600 whitespace-nowrap sm:whitespace-normal">{s.title}</span>
+                        <a href={s.youtubeId ? `https://youtu.be/${s.youtubeId}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(s.title)}`}
+                           target="_blank" rel="noopener noreferrer"
+                           className="relative group/tt font-serif font-bold text-slate-800 text-sm sm:text-lg hover:text-red-600 group-hover:text-sky-600 whitespace-nowrap sm:whitespace-normal transition inline-flex items-center gap-1.5">
+                          {s.title}
+                          <Youtube size={14} className="opacity-0 group-hover:opacity-60 text-red-500 transition shrink-0"/>
+                          <FastTooltip text={t('前往 YouTube 聆聽', language)} />
+                        </a>
                       </div>
                     </td>
                     <td className="p-3 sm:p-4 text-xs sm:text-sm text-slate-500">{s.artist || '-'}</td>
