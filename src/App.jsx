@@ -79,6 +79,7 @@ const TRANSLATIONS = {
   "服事表主領": "Roster leader",
   "多人用 / 分隔。改過的欄位不會再被服事表覆蓋。": "Separate names with /. Edited fields are never overwritten by the roster.",
   "服事表尚未排班": "Not on the roster yet",
+  "滑到日期可先看服事表排了誰": "Hover a date to see who is on the roster",
   "讀取中...": "Loading...",
   "歌單資訊": "Setlist Info",
   "詩歌清單": "Songs",
@@ -1410,6 +1411,16 @@ export default function App() {
   const prevMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
   const nextMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
 
+  const [pickerMonth, setPickerMonth] = useState(new Date());
+
+  // 進到編輯畫面時，日曆跳到歌單那一天所在的月份
+  useEffect(() => {
+    if (view !== 'list' || !meta.date) return;
+    const [y, m] = meta.date.split('-').map(Number);
+    if (y && m) setPickerMonth(prev =>
+      (prev.getFullYear() === y && prev.getMonth() === m - 1) ? prev : new Date(y, m - 1, 1));
+  }, [view, meta.date]);
+
   // 日曆上滑過的日期，先去服事表看那天誰帶敬拜（同一年只會抓一次，之後都是查快取）
   const peekRoster = useCallback((dateStr) => {
     if (peekedRef.current.has(dateStr)) return;
@@ -1422,6 +1433,70 @@ export default function App() {
       })))
       .catch(() => setRosterPeek(prev => ({ ...prev, [dateStr]: { status: 'done', wl: '' } })));
   }, []);
+
+  // 預備歌單時用的日曆：滑到哪一天就先去服事表看那天排了誰，
+  // 還沒排的日期也會講清楚，不用選下去才知道。
+  const renderDatePicker = () => {
+    const year = pickerMonth.getFullYear();
+    const month = pickerMonth.getMonth();
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const cells = [];
+
+    ['日', '一', '二', '三', '四', '五', '六'].forEach(d => {
+      cells.push(<div key={`h-${d}`} className="text-center text-[10px] font-bold text-slate-300 py-1">{t(d, language)}</div>);
+    });
+    for (let i = 0; i < firstDay; i += 1) cells.push(<div key={`e-${i}`} />);
+
+    for (let d = 1; d <= daysInMonth; d += 1) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const isSelected = meta.date === dateStr;
+      const isToday = dateStr === today;
+      const isSunday = new Date(year, month, d).getDay() === 0;
+      const peek = rosterPeek[dateStr];
+      const tip = peek?.status === 'loading'
+        ? t('讀取中...', language)
+        : peek?.status === 'done'
+          ? (peek.wl ? `${t('服事表主領', language)}: ${peek.wl}` : t('服事表尚未排班', language))
+          : '';
+
+      cells.push(
+        <div key={d} className="flex justify-center items-center py-0.5">
+          <button type="button"
+            onMouseEnter={() => peekRoster(dateStr)}
+            onFocus={() => peekRoster(dateStr)}
+            onClick={() => handleMetaChange('date', dateStr)}
+            className={`relative group/tt w-7 h-7 rounded-full flex items-center justify-center text-[11px] transition
+              ${isSelected ? 'bg-sky-500 text-white font-bold shadow-md'
+                : isToday ? 'bg-slate-100 text-slate-900 font-bold hover:bg-sky-50'
+                : isSunday ? 'text-slate-700 font-bold hover:bg-sky-50'
+                : 'text-slate-400 hover:bg-slate-50'}`}>
+            {d}
+            {peek?.status === 'done' && peek.wl && !isSelected && (
+              <span className="absolute bottom-0.5 w-1 h-1 bg-sky-400 rounded-full"></span>
+            )}
+            <FastTooltip text={tip} />
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="border border-slate-200 rounded-xl p-2.5 bg-white shadow-sm">
+        <div className="flex items-center justify-between mb-1.5 px-0.5">
+          <span className="text-[11px] font-bold text-slate-600 font-mono">
+            {year} <span className="text-slate-300 font-light">/</span> <span className="text-sky-600">{String(month + 1).padStart(2, '0')}</span>
+          </span>
+          <div className="flex items-center bg-slate-50 rounded-lg border border-slate-100 p-0.5">
+            <button type="button" onClick={() => setPickerMonth(new Date(year, month - 1, 1))} className="p-1 hover:bg-white rounded-md text-slate-400 hover:text-sky-600 transition"><ChevronLeft size={13}/></button>
+            <button type="button" onClick={() => setPickerMonth(new Date(year, month + 1, 1))} className="p-1 hover:bg-white rounded-md text-slate-400 hover:text-sky-600 transition"><ChevronRight size={13}/></button>
+          </div>
+        </div>
+        <div className="grid grid-cols-7">{cells}</div>
+        <p className="text-[9px] text-slate-400 mt-1.5 leading-relaxed">{t('滑到日期可先看服事表排了誰', language)}</p>
+      </div>
+    );
+  };
 
   const renderCalendar = () => {
     const year = currentMonth.getFullYear();
@@ -1447,26 +1522,15 @@ export default function App() {
       const isSelected = homeSearchQuery === dateStr;
       const isToday = dateStr === today;
       
-      const lines = [];
+      let tooltipText = '';
       if (hasSetlist) {
-        lines.push(...daySetlists.map(s => `${t('主領', language)}: ${s.wl || t('未指定', language)}`));
+        tooltipText = daySetlists.map(s => `${t('主領', language)}: ${s.wl || t('未指定', language)}`).join('\n');
       }
-      const peek = rosterPeek[dateStr];
-      if (peek?.status === 'loading') lines.push(t('讀取中...', language));
-      else if (peek?.status === 'done') {
-        lines.push(peek.wl
-          ? `${t('服事表主領', language)}: ${peek.wl}`
-          : t('服事表尚未排班', language));
-      }
-      const tooltipText = lines.join('\n');
 
       days.push(
         <div key={d} className="p-1 flex justify-center items-center">
           <button
-            onMouseEnter={() => peekRoster(dateStr)}
-            onFocus={() => peekRoster(dateStr)}
             onClick={() => {
-              peekRoster(dateStr);
               if (homeSearchQuery === dateStr) setHomeSearchQuery(''); // 取消過濾
               else if (hasSetlist) setHomeSearchQuery(dateStr); // 過濾此日歌單
             }}
@@ -1474,13 +1538,13 @@ export default function App() {
               ${isSelected ? 'bg-sky-500 text-white font-bold shadow-md scale-110' :
                 hasSetlist ? 'bg-sky-50 text-sky-600 font-bold hover:bg-sky-100 border border-sky-200 cursor-pointer' :
                 isToday ? 'bg-slate-100 text-slate-900 font-bold' :
-                'text-slate-400 hover:bg-slate-50 opacity-60'}`}
+                'text-slate-400 hover:bg-slate-50 cursor-default opacity-50'}`}
           >
             {d}
             {hasSetlist && !isSelected && (
               <span className="absolute bottom-0.5 w-1 h-1 bg-sky-500 rounded-full"></span>
             )}
-            <FastTooltip text={tooltipText} />
+            {hasSetlist && <FastTooltip text={tooltipText} />}
           </button>
         </div>
       );
@@ -2625,7 +2689,10 @@ export default function App() {
                           </div>
                           <div className="w-px h-10 sm:h-12 bg-slate-200 group-hover:bg-sky-200 transition hidden sm:block"></div>
                           <div className="flex flex-col gap-1">
-                            <div className="text-sm font-bold text-slate-800 flex items-center gap-1.5"><User size={14} className="text-sky-500"/> {item.wl || t('未指定主領', language)}</div>
+                            <div className="relative group/tt text-sm font-bold text-slate-800 flex items-center gap-1.5 w-fit">
+                              <Mic size={14} className="text-sky-500 shrink-0" aria-label={t('主領', language)}/> {item.wl || t('未指定主領', language)}
+                              <FastTooltip text={t('主領', language)} />
+                            </div>
                             <div className="text-[9px] sm:text-[10px] text-slate-400 italic">{t('更新:', language)} {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '-'}</div>
                           </div>
                         </div>
@@ -2742,8 +2809,10 @@ export default function App() {
                 <CalendarDays size={20} className="text-sky-500"/> {t('歌單資訊', language)}
               </h2>
               <div className="space-y-5">
-                <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">{t('日期', language)}</label><input type="date" value={meta.date} onChange={e => handleMetaChange('date', e.target.value)} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-white shadow-sm focus:border-sky-500 outline-none transition text-sm sm:text-base" /></div>
-                <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">{t('主領', language)}</label><input type="text" value={meta.wl} onChange={e => handleMetaChange('wl', e.target.value)} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-white shadow-sm focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('主領是誰呢', language)} />
+                <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">{t('日期', language)}</label><input type="date" value={meta.date} onChange={e => handleMetaChange('date', e.target.value)} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-white shadow-sm focus:border-sky-500 outline-none transition text-sm sm:text-base" />
+                  <div className="mt-2.5">{renderDatePicker()}</div>
+                </div>
+                <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-widest flex items-center gap-1"><Mic size={12} className="text-sky-500"/> {t('主領', language)}</label><input type="text" value={meta.wl} onChange={e => handleMetaChange('wl', e.target.value)} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-white shadow-sm focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('主領是誰呢', language)} />
                   <div className="mt-2 min-h-[16px]">
                     {roster.status === 'loading' && (
                       <p className="text-[10px] text-slate-400 flex items-center gap-1"><Loader2 size={11} className="animate-spin"/> {t('讀取服事表...', language)}</p>
@@ -2761,8 +2830,11 @@ export default function App() {
                       const Icon = ROLE_ICONS[r.key] || Users;
                       const shown = teamDraft[r.key] ?? formatNames(meta.team?.[r.key]);
                       return (
-                        <div key={r.key} className="flex items-center gap-2" title={t(r.label, language)}>
-                          <Icon size={15} className="text-slate-400 shrink-0" aria-label={t(r.label, language)} />
+                        <div key={r.key} className="flex items-center gap-2">
+                          <span className="relative group/tt shrink-0 flex items-center">
+                            <Icon size={15} className="text-sky-500" aria-label={t(r.label, language)} />
+                            <FastTooltip text={t(r.label, language)} />
+                          </span>
                           <input type="text" value={shown}
                             onChange={e => handleTeamChange(r.key, e.target.value)}
                             onBlur={() => setTeamDraft(prev => { const n = { ...prev }; delete n[r.key]; return n; })}
@@ -2793,9 +2865,12 @@ export default function App() {
                     <div className="flex-1 w-full overflow-hidden">
                       <div className="flex items-center gap-2 sm:gap-3 mb-1">
                         <span className="shrink-0 w-6 h-6 rounded-md bg-slate-900 text-white flex items-center justify-center font-serif font-bold text-[11px]">{index + 1}</span>
-                        <h3 className="font-bold font-serif text-base sm:text-lg truncate">{String(item.title || t('未命名', language))} <span className="font-sans font-normal text-slate-400 text-xs sm:text-sm">({String(item.key || 'C')})</span></h3>
+                        <h3 className="font-bold font-serif text-base sm:text-lg truncate flex items-center gap-2 min-w-0">
+                          <span className="truncate">{String(item.title || t('未命名', language))}</span>
+                          <span className="font-mono text-[9px] font-bold text-sky-600 bg-sky-100/80 border border-sky-200 px-1 py-[2px] rounded leading-none shrink-0">{String(item.key || 'C')}</span>
+                        </h3>
                       </div>
-                      <div className="text-[11px] sm:text-[13px] text-blue-600 font-mono pl-8 sm:pl-9 font-bold tracking-wider overflow-x-auto custom-scrollbar pb-1">
+                      <div className="text-[11px] sm:text-[12px] text-slate-500 font-mono pl-8 sm:pl-10 tracking-wide overflow-x-auto custom-scrollbar pb-1">
                         {String(item.mapString || t('未設定段落', language))}
                       </div>
                       <div className="pl-8 sm:pl-9 mt-2">
@@ -2936,7 +3011,7 @@ export default function App() {
                       ); 
                     })}
                   </div>
-                  <div className="mb-6 sm:mb-8"><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1.5 sm:mb-2 uppercase tracking-widest">{t('編輯字串 (Map String)', language)}</label><textarea value={currentMap} onChange={e => setCurrentMap(e.target.value)} rows={3} className="w-full border rounded-xl p-3 sm:p-4 bg-white font-mono shadow-sm outline-none focus:border-sky-500 transition text-blue-600 font-bold text-sm sm:text-base" placeholder={`${t('例如：', language)}I-V1-C-V2-C-B-C-E`} /></div>
+                  <div className="mb-6 sm:mb-8"><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-1.5 sm:mb-2 uppercase tracking-widest">{t('編輯字串 (Map String)', language)}</label><textarea value={currentMap} onChange={e => setCurrentMap(e.target.value)} rows={3} className="w-full border border-slate-200 rounded-xl p-3 sm:p-4 bg-white font-mono shadow-sm outline-none focus:border-sky-500 transition text-sky-700 text-sm sm:text-base" placeholder={`${t('例如：', language)}I-V1-C-V2-C-B-C-E`} /></div>
                   <button onClick={saveToSetlist} disabled={!currentMap.trim()} className="w-full py-3 sm:py-4 bg-sky-500 hover:bg-sky-600 text-white font-serif rounded-xl shadow-lg transition active:scale-[0.98] disabled:opacity-50 text-sm sm:text-base">{t('確認加入歌單', language)}</button>
                 </div>
               </div>
@@ -3409,9 +3484,10 @@ export default function App() {
             </div>
 
             <div className="shrink-0 bg-white border-b border-slate-200 px-3 sm:px-5 py-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-              <span className="inline-flex items-center gap-1.5" title={t('主領', language)}>
+              <span className="relative group/tt inline-flex items-center gap-1.5">
                 <Mic size={14} className="text-sky-500 shrink-0" aria-label={t('主領', language)} />
                 <span className="text-[12px] font-bold text-slate-900">{meta.wl || t('未指定', language)}</span>
+                <FastTooltip text={t('主領', language)} />
               </span>
               <span className="text-slate-300 text-[10px] leading-none">·</span>
               <TeamLine team={meta.team} language={language} t={t} iconSize={13} valueClass="text-[11px]" />
@@ -3596,7 +3672,7 @@ const ROLE_ICONS = {
 
 // 服事同工：圖示＋人名。主領預設不放進來 —— 它在每個畫面上都有更顯眼的位置。
 const TeamLine = ({ team, language, t, includeWl = false, className = '',
-                   iconSize = 12, valueClass = 'text-[11px]' }) => {
+                   iconSize = 12, valueClass = 'text-[11px]', tooltip = true }) => {
   if (!team) return null;
   const roles = ROSTER_ROLES
     .filter(r => includeWl || r.key !== 'wl')
@@ -3609,9 +3685,10 @@ const TeamLine = ({ team, language, t, includeWl = false, className = '',
         return (
           <React.Fragment key={r.key}>
             {i > 0 && <span className="text-slate-300 text-[10px] leading-none">·</span>}
-            <span className="inline-flex items-center gap-1" title={t(r.label, language)}>
-              <Icon size={iconSize} className="text-slate-400 shrink-0" aria-label={t(r.label, language)} />
+            <span className={`inline-flex items-center gap-1 ${tooltip ? 'relative group/tt' : ''}`}>
+              <Icon size={iconSize} className="text-sky-500 shrink-0" aria-label={t(r.label, language)} />
               <span className={`${valueClass} font-medium text-slate-600`}>{formatNames(team[r.key])}</span>
+              {tooltip && <FastTooltip text={t(r.label, language)} />}
             </span>
           </React.Fragment>
         );
@@ -3705,14 +3782,14 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
       </div>
       <div className="text-right flex flex-col items-end gap-1">
         <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
-          <Mic size={10} /> Worship Leader
+          <Mic size={10} className="text-sky-500" /> Worship Leader
         </span>
         <span className="text-[15px] font-serif font-bold text-slate-800 leading-none">{meta.wl || t('未指定', language)}</span>
       </div>
       </div>
       {meta.team && !isRosterEmpty(meta.team) && (
         <div className="mt-2">
-          <TeamLine team={meta.team} language={language} t={t}
+          <TeamLine team={meta.team} language={language} t={t} tooltip={false}
                     iconSize={isLarge ? 13 : 11}
                     valueClass={isLarge ? 'text-[11px]' : 'text-[9px]'} />
         </div>
