@@ -3,6 +3,7 @@ import { Search, Plus, Trash2, ArrowUp, ArrowDown, Edit2, X, ChevronLeft, Chevro
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { ROSTER_ROLES, lookupRoster, isRosterEmpty, formatNames } from './roster';
 
 // -----------------------------------------------------------------------------
 // Translations (i18n) Dictionary
@@ -68,6 +69,15 @@ const TRANSLATIONS = {
   "合併中...": "Merging...",
   "整份下載": "Download All",
   "續": "cont.",
+  "服事同工": "Serving Team",
+  "和聲": "Vocals",
+  "鍵盤": "Keys",
+  "鼓": "Drums",
+  "貝斯": "Bass",
+  "音控": "Sound",
+  "讀取服事表...": "Reading roster...",
+  "服事表還沒排這一天": "Roster not set for this date",
+  "從服事表同步": "Sync from roster",
   "歷史歌單": "Old setlist",
   "檔名無歌名": "No title in filename",
   "改用新分頁開啟": "Open in a new tab",
@@ -1038,7 +1048,11 @@ export default function App() {
   const [previewZoom, setPreviewZoom] = useState(1);
   
   const today = new Date().toISOString().split('T')[0];
-  const [meta, setMeta] = useState({ date: today, wl: '', youtubePlaylistUrl: '' });
+  const [meta, setMeta] = useState({ date: today, wl: '', youtubePlaylistUrl: '', team: null });
+  // 服事表查詢結果。查不到、抓不到一律退回手動輸入，不擋人做歌單。
+  const [roster, setRoster] = useState({ status: 'idle', team: null });
+  const autoWlRef = useRef('');   // 上一次自動填入的主領字串，用來分辨「主領有沒有自己改過」
+  const metaRef = useRef(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
   // --- Setlist Management State ---
@@ -1215,6 +1229,7 @@ export default function App() {
         id, 
         date: meta.date, 
         wl: meta.wl, 
+        team: meta.team || null,
         youtubePlaylistUrl: meta.youtubePlaylistUrl || '',
         songs: setlist, 
         updatedAt: new Date().toISOString() 
@@ -1239,6 +1254,38 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [hasSetlistChanges, view, saveCurrentSetlist, isSavingSetlist]);
+
+  // 把服事表的結果套進歌單。onlyIfUntouched 時不會蓋掉主領手動改過的名字。
+  const applyRoster = useCallback((team, { onlyIfUntouched = false } = {}) => {
+    const prev = metaRef.current;
+    if (!prev) return;
+    const wl = formatNames(team.wl);
+    // 主領手動改過名字時（跟上次自動填入的不一樣），自動同步不去蓋它
+    const edited = prev.wl && prev.wl !== autoWlRef.current;
+    const keepWl = (onlyIfUntouched && edited) || !wl;
+    const next = { ...prev, team, wl: keepWl ? prev.wl : wl };
+    // 真的有變才算「未儲存的變更」，只是打開來看不該讓歌單變成待存
+    if (next.wl === prev.wl && JSON.stringify(next.team) === JSON.stringify(prev.team)) return;
+    if (!keepWl) autoWlRef.current = wl;
+    setMeta(next);
+    setHasSetlistChanges(true);
+  }, []);
+
+  useEffect(() => { metaRef.current = meta; }, [meta]);
+
+  // 編輯歌單時，選了日期就去查那一週的服事表
+  useEffect(() => {
+    if (view !== 'list' || !meta.date) return;
+    let alive = true;
+    setRoster({ status: 'loading', team: null });
+    lookupRoster(meta.date).then(team => {
+      if (!alive) return;
+      if (!team || isRosterEmpty(team)) { setRoster({ status: 'none', team: null }); return; }
+      setRoster({ status: 'found', team });
+      applyRoster(team, { onlyIfUntouched: true });
+    }).catch(() => { if (alive) setRoster({ status: 'none', team: null }); });
+    return () => { alive = false; };
+  }, [view, meta.date, applyRoster]);
 
   // Helper functions to update state and mark as changed
   const handleMetaChange = (field, value) => {
@@ -1269,6 +1316,7 @@ export default function App() {
         try {
           await setDoc(doc(firestoreDb, 'artifacts', currentAppId, 'public', 'data', 'icc_setlists', currentSetlistId), {
             id: currentSetlistId, date: meta.date, wl: meta.wl,
+            team: meta.team || null,
             youtubePlaylistUrl: meta.youtubePlaylistUrl || '',
             songs: next, updatedAt: new Date().toISOString(),
           }, { merge: true });
@@ -1328,6 +1376,12 @@ export default function App() {
       console.error("Sign-out Error:", error);
     }
   };
+
+  // 首頁的「當週」＝ 今天之後最近的一份歌單（都過去了就用最新的那份）
+  const currentWeekId = (() => {
+    const upcoming = setlistsDb.filter(x => x.date >= today).sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+    return (upcoming || setlistsDb[0])?.id || null;
+  })();
 
   const filteredHomeSetlists = setlistsDb.filter(item => {
     const q = homeSearchQuery.toLowerCase();
@@ -1495,12 +1549,12 @@ export default function App() {
   const openSetlist = (obj) => { 
     setCurrentSetlistId(obj.id); 
     loadLocalPicks(obj.id);
-    setMeta({ date: obj.date, wl: obj.wl, youtubePlaylistUrl: obj.youtubePlaylistUrl || '' }); 
+    setMeta({ date: obj.date, wl: obj.wl, youtubePlaylistUrl: obj.youtubePlaylistUrl || '', team: obj.team || null }); 
     setSetlist(obj.songs || []); 
     setHasSetlistChanges(false);
     setView('list'); 
   };
-  const createNewSetlist = () => { setCurrentSetlistId(null); setMeta({ date: today, wl: '', youtubePlaylistUrl: '' }); setSetlist([]); setHasSetlistChanges(false); setView('list'); };
+  const createNewSetlist = () => { setCurrentSetlistId(null); setMeta({ date: today, wl: '', youtubePlaylistUrl: '', team: null }); setSetlist([]); setHasSetlistChanges(false); setView('list'); };
   const openPreviewFromHome = (obj) => { openSetlist(obj); setPreviewSource('home'); setView('preview'); };
   const openPreviewFromList = () => { setPreviewSource('list'); setView('preview'); };
 
@@ -2551,13 +2605,18 @@ export default function App() {
                               );
                             })}
                           </div>
+                          {item.id === currentWeekId && item.team && !isRosterEmpty(item.team) && (
+                            <div className="mt-3 pt-3 border-t border-slate-100">
+                              <TeamLine team={item.team} language={language} t={t} labelClass="text-[8px]" valueClass="text-[10px]" />
+                            </div>
+                          )}
                         </div>
                         
                         <div className="flex flex-col gap-2 shrink-0 w-full md:w-[130px] pt-4 md:pt-0 mt-2 md:mt-0 border-t md:border-0 border-slate-50">
                           <button onClick={() => openPreviewFromHome(item)} className="w-full px-4 py-2 sm:py-2.5 bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md hover:bg-sky-600 transition flex justify-center items-center gap-2">
                             <Eye size={16}/> {t('歌手預覽', language)}
                           </button>
-                          <button onClick={() => { setCurrentSetlistId(item.id); setMeta({ date: item.date, wl: item.wl, youtubePlaylistUrl: item.youtubePlaylistUrl || '' }); setSetlist(item.songs || []); loadLocalPicks(item.id); setActiveSheetSong(0); setActiveSheetId(null); setView('sheets'); }}
+                          <button onClick={() => { setCurrentSetlistId(item.id); setMeta({ date: item.date, wl: item.wl, youtubePlaylistUrl: item.youtubePlaylistUrl || '', team: item.team || null }); setSetlist(item.songs || []); loadLocalPicks(item.id); setActiveSheetSong(0); setActiveSheetId(null); setView('sheets'); }}
                             className="w-full px-4 py-2 sm:py-2.5 bg-slate-500 hover:bg-slate-600 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition flex justify-center items-center gap-2">
                             <FileText size={16}/> {t('樂手樂譜', language)}
                           </button>
@@ -2640,7 +2699,27 @@ export default function App() {
               <h2 className="text-xs sm:text-sm font-bold tracking-widest text-slate-900 border-b pb-3 mb-5 sm:mb-6 uppercase">Information</h2>
               <div className="space-y-4">
                 <div><label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest">{t('日期', language)}</label><input type="date" value={meta.date} onChange={e => handleMetaChange('date', e.target.value)} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" /></div>
-                <div><label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest">{t('主領', language)}</label><input type="text" value={meta.wl} onChange={e => handleMetaChange('wl', e.target.value)} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('主領是誰呢', language)} /></div>
+                <div><label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest">{t('主領', language)}</label><input type="text" value={meta.wl} onChange={e => handleMetaChange('wl', e.target.value)} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('主領是誰呢', language)} />
+                  <div className="mt-2 min-h-[18px]">
+                    {roster.status === 'loading' && (
+                      <p className="text-[10px] text-slate-400 flex items-center gap-1"><Loader2 size={11} className="animate-spin"/> {t('讀取服事表...', language)}</p>
+                    )}
+                    {roster.status === 'none' && (
+                      <p className="text-[10px] text-slate-400">{t('服事表還沒排這一天', language)}</p>
+                    )}
+                    {roster.status === 'found' && roster.team && (
+                      <div className="space-y-1.5">
+                        <TeamLine team={roster.team} language={language} t={t} labelClass="text-[8px]" valueClass="text-[10px]" />
+                        {formatNames(roster.team.wl) && formatNames(roster.team.wl) !== meta.wl && (
+                          <button type="button" onClick={() => applyRoster(roster.team)}
+                            className="text-[10px] font-bold text-sky-600 hover:text-sky-700 underline underline-offset-2 text-left">
+                            {t('從服事表同步', language)}：{formatNames(roster.team.wl)}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <div>
                   <label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest flex items-center gap-1"><Youtube size={12}/> {t('YouTube 歌單連結 (選填)', language)}</label>
                   <input type="text" value={meta.youtubePlaylistUrl} onChange={e => handleMetaChange('youtubePlaylistUrl', e.target.value)} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('貼上 YouTube 歌單網址...', language)} />
@@ -3271,6 +3350,12 @@ export default function App() {
               </div>
             </div>
 
+            {meta.team && !isRosterEmpty(meta.team) && (
+              <div className="shrink-0 bg-white border-b border-slate-200 px-3 sm:px-5 py-2">
+                <TeamLine team={meta.team} language={language} t={t} labelClass="text-[8px]" valueClass="text-[10px]" />
+              </div>
+            )}
+
             {mergeError && (
               <div className="shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 text-[11px] text-amber-800 font-bold flex items-start gap-2">
                 <X size={14} className="shrink-0 mt-0.5 cursor-pointer" onClick={() => setMergeError('')}/>
@@ -3436,6 +3521,26 @@ export default function App() {
 const PRINT_PAGE_W = 816;
 const PRINT_PAGE_H = 975;
 
+// 服事同工：一行灰階小字。主領不放進來 —— 它在每個畫面上都有更顯眼的位置。
+const TeamLine = ({ team, language, t, includeWl = false, className = '',
+                   labelClass = 'text-[9px]', valueClass = 'text-[11px]' }) => {
+  if (!team) return null;
+  const roles = ROSTER_ROLES
+    .filter(r => includeWl || r.key !== 'wl')
+    .filter(r => (team[r.key] || []).length);
+  if (!roles.length) return null;
+  return (
+    <div className={`flex flex-wrap items-baseline gap-x-3 gap-y-1 ${className}`}>
+      {roles.map(r => (
+        <span key={r.key} className="inline-flex items-baseline gap-1">
+          <span className={`${labelClass} font-bold uppercase tracking-widest text-slate-400`}>{t(r.label, language)}</span>
+          <span className={`${valueClass} font-medium text-slate-600`}>{formatNames(team[r.key])}</span>
+        </span>
+      ))}
+    </div>
+  );
+};
+
 const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplanation, getFullTagExplanation, pdfMode }) => {
   const isOnePage = pdfMode === 'onepage';
   const isLarge = pdfMode === 'large';
@@ -3508,7 +3613,8 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
 
   // ---- 版面元件：量測與正式渲染共用同一份，量到的才會等於印出來的 ----
   const renderHeader = () => (
-    <div className={`flex justify-between items-end border-slate-900 ${headerGap} mt-0 shrink-0`}>
+    <div className={`border-slate-900 ${headerGap} mt-0 shrink-0`}>
+      <div className="flex justify-between items-end">
       <div className="flex flex-col gap-1">
         <h1 className={`${titleTextClass} font-serif font-black tracking-widest text-slate-900 uppercase leading-none m-0`}>ICC Worship Song Map</h1>
         <div className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded shadow-sm w-fit">
@@ -3522,6 +3628,14 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
         <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Worship Leader</span>
         <span className="text-[15px] font-serif font-bold text-slate-800 leading-none">{meta.wl || t('未指定', language)}</span>
       </div>
+      </div>
+      {meta.team && !isRosterEmpty(meta.team) && (
+        <div className="mt-2">
+          <TeamLine team={meta.team} language={language} t={t}
+                    labelClass={isLarge ? 'text-[9px]' : 'text-[7px]'}
+                    valueClass={isLarge ? 'text-[11px]' : 'text-[9px]'} />
+        </div>
+      )}
     </div>
   );
 
@@ -3597,7 +3711,7 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
 
   // 只有「內容或版式真的變了」才重量一次，量完存起來；避免每次 render 都重算
   const measureKey = JSON.stringify([
-    pdfMode, language, fontTick, meta.date, meta.wl,
+    pdfMode, language, fontTick, meta.date, meta.wl, meta.team,
     songs.map(sg => [
       sg.item.title, sg.item.key, sg.item.mapString,
       sg.sections.map(x => [x.section, x.text]),
