@@ -3705,6 +3705,69 @@ const TeamLine = ({ team, language, t, includeWl = false, className = '',
   );
 };
 
+// 段落動線：走一遍 song map，算出「幾條箭頭、各自涵蓋哪些段落」。
+//
+//   能往下 → 同一條線繼續
+//   往回   → 收掉，開一條新的
+//   沒有歌詞的段落（間奏等）→ 也收掉，段落名記在收尾處
+//   連續重複 → 不開新線，記次數
+//   中文版與英文版算不同段落，互換就開新線
+//
+const FLOW_ENG = /^(e|eng|english|英文|英)$/i;
+const flowTagBase = (t) => String(t).replace(/\(.*?\)/g, '').trim().toUpperCase();
+const flowTagNote = (t) => { const m = String(t).match(/\((.*?)\)/); return m ? m[1].trim() : ''; };
+// 開頭的前奏與結尾的收尾不標 —— 那兩個位置歌手本來就知道
+const FLOW_SILENT = new Set(['I', 'E']);
+// 表上偶爾會把整句話寫進 map（"back to 4th song"、"因祢是主x2"）。
+// 那種長度塞不進動線旁的小字，就不標 —— 每頁上方的完整 song map 還是看得到。
+const FLOW_MAX_LABEL = 4;
+
+const flowKey = (t) => String(t).toUpperCase().replace(/\s+/g, '');
+
+const buildFlow = (mapString, sections) => {
+  const rowOf = new Map();
+  sections.forEach((s, i) => rowOf.set(flowKey(s.section), i));
+
+  const arrows = [];
+  let cur = null, prevRow = -1, prevKey = null;
+  const park = () => { if (cur) { arrows.push(cur); cur = null; prevRow = -1; prevKey = null; } };
+
+  String(mapString || '').split('-').map(x => x.trim()).filter(Boolean).forEach(raw => {
+    const tag = flowTagBase(raw);
+    if (!tag) return;
+    // 有些歌的英文段落在資料庫裡是獨立的區塊（PC(ENG) 自成一段），
+    // 那就直接指到它；沒有的話才退回同名的中文段落。
+    const full = flowKey(raw);
+    const exact = rowOf.has(full);
+    const row = exact ? rowOf.get(full) : rowOf.get(tag);
+
+    if (row === undefined) {
+      // 沒有歌詞的段落：收掉目前這條線，段落名記在它下面。
+      // 可能連著好幾個（例如結尾的 L1-L1），所以是一個清單，不是一個字。
+      park();
+      const host = arrows[arrows.length - 1];
+      if (host && !FLOW_SILENT.has(tag) && tag.length <= FLOW_MAX_LABEL) host.after.push(tag);
+      return;
+    }
+
+    const note = flowTagNote(raw);
+    // 英文段落若已經自成一個歌詞區塊，區塊標題本身就寫著 (ENG)，不必再標一次
+    const eng = !exact && FLOW_ENG.test(note);
+    const mark = !exact && !eng && !!note;
+    const key = exact ? full : `${tag}${eng ? '#E' : ''}`;
+    if (cur && key === prevKey) { cur.stops[cur.stops.length - 1].n += 1; return; }
+    if (cur && row > prevRow) { cur.stops.push({ row, n: 1, eng, mark }); prevRow = row; prevKey = key; return; }
+    park();
+    cur = { stops: [{ row, n: 1, eng, mark }], after: [] };
+    prevRow = row; prevKey = key;
+  });
+  park();
+  return arrows;
+};
+
+const FLOW_PITCH = 12;                                   // 軌道間距
+const flowRailWidth = (arrows) => (arrows.length ? arrows.length * FLOW_PITCH + 2 : 0);
+
 const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplanation, getFullTagExplanation, pdfMode }) => {
   const isOnePage = pdfMode === 'onepage';
   const isLarge = pdfMode === 'large';
@@ -3774,6 +3837,13 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
   };
 
   const songs = setlist.map(item => ({ item, sections: getOrderedLyrics(item) }));
+
+  // 每首歌的段落動線。一頁版整體會縮到四成五，線與圓球會糊成一點，所以不畫。
+  const flows = songs.map(sg => (isOnePage ? [] : buildFlow(sg.item.mapString, sg.sections)));
+  const rails = flows.map(flowRailWidth);
+  const FLOW_COL_GAP = 6;
+  // 歌詞實際可用的寬度：扣掉動線那一欄
+  const textW = (i, colW) => colW - (rails[i] ? rails[i] + FLOW_COL_GAP : 0);
 
   // ---- 版面元件：量測與正式渲染共用同一份，量到的才會等於印出來的 ----
   const renderHeader = () => (
@@ -3857,12 +3927,101 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
     </div>
   );
 
-  const renderSection = (s, key) => (
-    <div key={key} className="pl-2 border-l-[3px] border-sky-300 w-full" style={{ marginBottom: sectionGap }}>
+  const renderSection = (s, key, inGrid = false) => (
+    <div key={key} className="pl-2 border-l-[3px] border-sky-300 w-full" style={{ marginBottom: inGrid ? 0 : sectionGap }}>
       <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getFullTagExplanation(s.section, language)}</div>
       {s.text && <div className={`whitespace-pre-wrap ${lyricFontSize} text-slate-800 font-sans`}>{s.text}</div>}
     </div>
   );
+
+  // ---- 段落動線：跟歌詞放在同一個 grid，靠 grid-row 對齊，不必量座標 ----
+  // 用網站的金色，跟段落左邊那條淺藍分隔線分開，兩者才不會糊成一團
+  const FLOW_LINE = '#C4A977';
+  const FLOW_SOFT = '#E2D3B4';   // 跳過段落的虛線
+  const FLOW_INK = '#8C6D33';    // 圓球與徽章：白字要夠對比
+
+  const renderFlowStack = (songIdx, idxs) => {
+    const sections = songs[songIdx].sections;
+    const rail = rails[songIdx];
+    if (!rail) return idxs.map(j => renderSection(sections[j], j));
+
+    const pos = new Map();                      // 段落在這一欄是第幾列
+    idxs.forEach((j, p) => pos.set(j, p + 1));
+    const parts = [];
+    const gapUsed = {};                          // 同一列已經放了幾個灰字，用來上下錯開
+
+    flows[songIdx].forEach((a, ai) => {
+      const x = ai * FLOW_PITCH + 2;
+      const first = a.stops[0].row;
+      const last = a.stops[a.stops.length - 1].row;
+
+      idxs.forEach(j => {
+        if (j < first || j > last) return;
+        const stop = a.stops.find(st => st.row === j);
+        const isFirst = j === first;
+        const badge = stop && (stop.eng || stop.mark);
+        const count = stop && stop.n > 1;
+        const top = isFirst ? (badge ? 13 : 8) : 3;
+        const bottom = count ? 13 : 3;
+        parts.push(
+          <div key={`a${ai}s${j}`} style={{ gridColumn: 1, gridRow: pos.get(j), position: 'relative', marginLeft: x, width: 11 }}>
+            {isFirst && !badge && (
+              <span style={{ position: 'absolute', left: -1.25, top: 3, width: 4, height: 4, borderRadius: '50%', background: FLOW_LINE }} />
+            )}
+            {badge && (
+              <span style={{ position: 'absolute', left: -4.25, top: 1, width: 11, height: 11, borderRadius: '50%',
+                             background: '#fff', border: `1.2px solid ${FLOW_INK}`, color: FLOW_INK,
+                             fontSize: 7.5, fontWeight: 600, lineHeight: 1,
+                             display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {stop.eng ? 'E' : '＊'}
+              </span>
+            )}
+            <span style={stop
+              ? { position: 'absolute', left: 0, top, bottom, width: 1.5, borderRadius: 1, background: FLOW_LINE }
+              : { position: 'absolute', left: 0, top: 3, bottom: 3, borderLeft: `1.5px dotted ${FLOW_SOFT}` }} />
+            {count && (
+              <span style={{ position: 'absolute', left: -4.25, bottom: 1, width: 11, height: 11, borderRadius: '50%',
+                             background: FLOW_INK, color: '#fff', boxShadow: '0 0 0 1.5px #fff',
+                             fontSize: 7, fontWeight: 600, lineHeight: 1,
+                             display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {stop.n}
+              </span>
+            )}
+          </div>
+        );
+      });
+
+      // 收尾處那些沒有歌詞的段落（可能不只一個，例如結尾連著兩個 L1）
+      if (a.after.length && pos.has(last)) {
+        const row = pos.get(last);
+        const used = gapUsed[row] || 0;
+        gapUsed[row] = used + a.after.length;
+        a.after.forEach((tag, k) => {
+          parts.push(
+            <div key={`a${ai}after${k}`} style={{ gridColumn: 1, gridRow: row, alignSelf: 'end', justifySelf: 'start',
+                                                  width: 22, marginLeft: x - 10.25, textAlign: 'center',
+                                                  transform: `translateY(${12 + (used + k) * 9}px)`, zIndex: 3,
+                                                  fontSize: 7, fontWeight: 600, letterSpacing: '.03em',
+                                                  color: '#94a3b8', lineHeight: 1, background: '#fff' }}
+                 className="font-mono">
+              {tag}
+            </div>
+          );
+        });
+      }
+    });
+
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: `${rail}px 1fr`, columnGap: FLOW_COL_GAP, rowGap: sectionGap }}>
+        {parts}
+        {idxs.map((j, p) => (
+          <div key={`s${j}`} style={{ gridColumn: 2, gridRow: p + 1, minWidth: 0 }}>
+            {renderSection(sections[j], j, true)}
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   // ---- 量測：分頁不靠行數猜，直接問瀏覽器每一塊排出來多高 ----
   const measureRef = useRef(null);
@@ -3881,8 +4040,8 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
   // 只有「內容或版式真的變了」才重量一次，量完存起來；避免每次 render 都重算
   const measureKey = JSON.stringify([
     pdfMode, language, fontTick, meta.date, meta.wl, meta.team,
-    songs.map(sg => [
-      sg.item.title, sg.item.key, sg.item.mapString,
+    songs.map((sg, i) => [
+      sg.item.title, sg.item.key, sg.item.mapString, rails[i],
       sg.sections.map(x => [x.section, x.text]),
     ]),
   ]);
@@ -3923,12 +4082,14 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
           {/* 雙格排版時，這首歌整塊有多高 */}
           <div data-m={`half-${i}`} style={{ width: halfColW, display: 'flow-root' }}>
             {renderSongTitle(sg.item, i)}
-            {sg.sections.map((s, j) => renderSection(s, j))}
+            <div style={{ width: textW(i, halfColW) }}>
+              {sg.sections.map((s, j) => renderSection(s, j))}
+            </div>
           </div>
           {/* 獨立頁雙欄排版時，標題與每個段落各有多高 */}
           <div data-m={`t2-${i}`} style={{ width: innerW, display: 'flow-root' }}>{renderSongTitle(sg.item, i)}</div>
           {sg.sections.map((s, j) => (
-            <div key={j} data-m={`s2-${i}-${j}`} style={{ width: twoColW, display: 'flow-root' }}>{renderSection(s)}</div>
+            <div key={j} data-m={`s2-${i}-${j}`} style={{ width: textW(i, twoColW), display: 'flow-root' }}>{renderSection(s)}</div>
           ))}
         </React.Fragment>
       ))}
@@ -4037,7 +4198,7 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
                       <div className="flex w-full" style={{ gap: twoColGap, marginTop: soloTitleGap }}>
                         {pg.cols.map((col, ci) => (
                           <div key={ci} style={{ width: twoColW }}>
-                            {col.map(j => renderSection(songs[pg.songIdx].sections[j], j))}
+                            {renderFlowStack(pg.songIdx, col)}
                           </div>
                         ))}
                       </div>
@@ -4049,7 +4210,7 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
                         {row.map(j => (
                           <div key={j} style={{ width: innerW / 2, paddingLeft: colPad, paddingRight: colPad }}>
                             {renderSongTitle(songs[j].item, j)}
-                            {songs[j].sections.map((s, si) => renderSection(s, si))}
+                            {renderFlowStack(j, songs[j].sections.map((_, si) => si))}
                           </div>
                         ))}
                       </div>
