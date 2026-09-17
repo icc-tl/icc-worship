@@ -3770,30 +3770,33 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
   // ---- 版面元件：量測與正式渲染共用同一份，量到的才會等於印出來的 ----
   const renderHeader = () => (
     <div className={`border-slate-900 ${headerGap} mt-0 shrink-0`}>
-      <div className="flex justify-between items-end">
-      <div className="flex flex-col gap-1">
+      <div className="flex justify-between items-center gap-4">
         <h1 className={`${titleTextClass} font-serif font-black tracking-widest text-slate-900 uppercase leading-none m-0`}>ICC Worship Song Map</h1>
-        <div className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded shadow-sm w-fit">
+        <div className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded shadow-sm shrink-0">
           <CalendarDays size={12} className="text-sky-500" />
           <span className="text-[11px] font-bold tracking-[0.15em] font-mono leading-none pt-[1px]">
             {meta.date?.replace(/-/g, '/') || 'YYYY / MM / DD'}
           </span>
         </div>
       </div>
-      <div className="text-right flex flex-col items-end gap-1">
-        <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
-          <Mic size={10} className="text-sky-500" /> Worship Leader
+
+      {/* 主領與其他同工同一列：主領排最前面、字最重，其餘接在後面 */}
+      <div className={`flex flex-wrap items-center gap-x-2.5 gap-y-1 ${isOnePage ? 'mt-1.5' : 'mt-2.5'}`}>
+        <span className="inline-flex items-center gap-1.5">
+          <Mic size={isLarge ? 15 : 13} className="text-sky-500 shrink-0" />
+          <span className={`${isLarge ? 'text-[16px]' : 'text-[13px]'} font-serif font-bold text-slate-900 leading-none`}>
+            {meta.wl || t('未指定', language)}
+          </span>
         </span>
-        <span className="text-[15px] font-serif font-bold text-slate-800 leading-none">{meta.wl || t('未指定', language)}</span>
+        {meta.team && !isRosterEmpty(meta.team) && (
+          <>
+            <span className="text-slate-300 text-[10px] leading-none">·</span>
+            <TeamLine team={meta.team} language={language} t={t} tooltip={false}
+                      iconSize={isLarge ? 13 : 11}
+                      valueClass={isLarge ? 'text-[11px]' : 'text-[9px]'} />
+          </>
+        )}
       </div>
-      </div>
-      {meta.team && !isRosterEmpty(meta.team) && (
-        <div className="mt-2">
-          <TeamLine team={meta.team} language={language} t={t} tooltip={false}
-                    iconSize={isLarge ? 13 : 11}
-                    valueClass={isLarge ? 'text-[11px]' : 'text-[9px]'} />
-        </div>
-      )}
     </div>
   );
 
@@ -3879,9 +3882,13 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
   useLayoutEffect(() => {
     const root = measureRef.current;
     if (!root) return;
+    // 用 offsetHeight 而不是 getBoundingClientRect()：
+    // 預覽在窄視窗會整塊 zoom 縮小，rect 會跟著縮，但版面常數是 CSS 像素。
+    // 兩者混用會讓分頁以為每頁塞得下更多，內容就被裁掉（PDF 也一樣）。
+    // offsetHeight 回傳的是未縮放的版面像素，跟常數同一套單位。
     const h = (key) => {
       const n = root.querySelector(`[data-m="${key}"]`);
-      return n ? Math.ceil(n.getBoundingClientRect().height) : 0;
+      return n ? n.offsetHeight : 0;
     };
     const next = {
       header: h('header'),
