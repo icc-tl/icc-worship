@@ -3928,17 +3928,18 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
   );
 
   const renderSection = (s, key, inGrid = false) => (
-    <div key={key} className="pl-2 border-l-[3px] border-sky-300 w-full" style={{ marginBottom: inGrid ? 0 : sectionGap }}>
-      <div className={`font-bold text-sky-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getFullTagExplanation(s.section, language)}</div>
+    <div key={key} className="pl-2 border-l-[3px] border-slate-300 w-full" style={{ marginBottom: inGrid ? 0 : sectionGap }}>
+      <div className={`font-bold text-slate-600 ${sectionFontSize} mb-0.5 tracking-widest uppercase`}>{getFullTagExplanation(s.section, language)}</div>
       {s.text && <div className={`whitespace-pre-wrap ${lyricFontSize} text-slate-800 font-sans`}>{s.text}</div>}
     </div>
   );
 
   // ---- 段落動線：跟歌詞放在同一個 grid，靠 grid-row 對齊，不必量座標 ----
-  // 用網站的金色，跟段落左邊那條淺藍分隔線分開，兩者才不會糊成一團
-  const FLOW_LINE = '#C4A977';
-  const FLOW_SOFT = '#E2D3B4';   // 跳過段落的虛線
-  const FLOW_INK = '#8C6D33';    // 圓球與徽章：白字要夠對比
+  // 顏色讓給動線：歌詞段落的邊框退成灰，藍色只留給動線，
+  // 兩者才不會在這麼小的面積裡互搶。
+  const FLOW_LINE = '#0284c7';
+  const FLOW_SOFT = '#bfdbfe';   // 跳過段落的虛線
+  const FLOW_INK = '#0369a1';    // 圓球與徽章：白字要夠對比
 
   const renderFlowStack = (songIdx, idxs) => {
     const sections = songs[songIdx].sections;
@@ -4002,7 +4003,7 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
                                                   width: 22, marginLeft: x - 10.25, textAlign: 'center',
                                                   transform: `translateY(${12 + (used + k) * 9}px)`, zIndex: 3,
                                                   fontSize: 7, fontWeight: 600, letterSpacing: '.03em',
-                                                  color: '#94a3b8', lineHeight: 1, background: '#fff' }}
+                                                  color: FLOW_LINE, lineHeight: 1, background: '#fff' }}
                  className="font-mono">
               {tag}
             </div>
