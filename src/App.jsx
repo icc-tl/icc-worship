@@ -2684,16 +2684,22 @@ export default function App() {
                     const parts = item.date ? String(item.date).split('-') : [];
                     return (
                       <div key={item.id} className="hover:bg-slate-50 transition group">
-                        <div className="p-4 sm:p-6 md:p-8 flex flex-col md:flex-row gap-4 sm:gap-6 md:gap-8 items-start md:items-center">
+                        <div className="px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 md:pt-7 pb-4 sm:pb-5 flex flex-col md:flex-row gap-4 sm:gap-6 md:gap-8 items-start md:items-center">
                         
-                        <div className="flex gap-4 sm:gap-5 items-center shrink-0 w-full sm:w-auto min-w-[150px] border-b sm:border-0 border-slate-100 pb-3 sm:pb-0">
+                        <div className="flex gap-4 sm:gap-5 items-center shrink-0 w-full sm:w-auto min-w-[200px] border-b sm:border-0 border-slate-100 pb-3 sm:pb-0">
                           <div className="text-center w-14 sm:w-16">
                             <div className="text-[10px] sm:text-[11px] font-bold text-sky-500 uppercase tracking-widest">{parts[1] ? getMonthNameShort(parts[1]) : 'MTH'}</div>
                             <div className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 my-0.5 leading-none">{parts[2] || 'DD'}</div>
                             <div className="text-[9px] sm:text-[10px] font-mono text-slate-400">{parts[0] || 'YYYY'}</div>
                           </div>
                           <div className="w-px h-10 sm:h-12 bg-slate-200 group-hover:bg-sky-200 transition hidden sm:block"></div>
-                          <div className="text-[9px] sm:text-[10px] text-slate-400 italic">{t('更新:', language)} {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '-'}</div>
+                          <div className="flex flex-col gap-1">
+                            <div className="relative group/tt text-[15px] font-bold text-slate-900 flex items-center gap-1.5 w-fit leading-tight">
+                              <Mic size={15} className="text-sky-500 shrink-0" aria-label={t('主領', language)}/> {item.wl || t('未指定主領', language)}
+                              <FastTooltip text={t('主領', language)} />
+                            </div>
+                            <div className="text-[9px] sm:text-[10px] text-slate-400 italic">{t('更新:', language)} {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '-'}</div>
+                          </div>
                         </div>
                         
                         <div className="flex-1 w-full mt-2 sm:mt-0">
@@ -2742,22 +2748,12 @@ export default function App() {
                         </div>
                         </div>
 
-                        {/* 服事同工：整張卡片寬度的一條淡底色橫帶，主領排最前面，順便把每週分得更開 */}
-                        <div className="px-4 sm:px-6 md:px-8 py-2.5 bg-slate-50/80 border-t border-slate-100 overflow-x-auto custom-scrollbar">
-                          <div className="flex items-center gap-x-2.5 flex-nowrap">
-                            <span className="relative group/tt inline-flex items-center gap-1.5 shrink-0">
-                              <Mic size={14} className="text-sky-500 shrink-0" aria-label={t('主領', language)}/>
-                              <span className="text-[12px] font-bold text-slate-900 whitespace-nowrap">{item.wl || t('未指定主領', language)}</span>
-                              <FastTooltip text={t('主領', language)} />
-                            </span>
-                            {item.team && !isRosterEmpty(item.team) && (
-                              <>
-                                <span className="text-slate-300 text-[10px] leading-none shrink-0">·</span>
-                                <TeamLine team={item.team} language={language} t={t} wrap={false} iconSize={13} valueClass="text-[11px]" />
-                              </>
-                            )}
+                        {/* 服事同工：整張卡片寬度的一條淡底色橫帶，順便把每週分得更開 */}
+                        {item.team && !isRosterEmpty(item.team) && (
+                          <div className="px-4 sm:px-6 md:px-8 py-3 bg-slate-50 border-t border-slate-100 overflow-x-auto custom-scrollbar">
+                            <TeamLine team={item.team} language={language} t={t} wrap={false} iconSize={13} valueClass="text-[11px]" />
                           </div>
-                        </div>
+                        )}
                       </div>
                     );
                   }) : (
