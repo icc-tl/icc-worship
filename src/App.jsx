@@ -759,9 +759,11 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
   const [pageNum, setPageNum] = useState(1);
   const [status, setStatus] = useState(sheet?.url && !prefersNativeViewer ? 'loading' : 'idle');   // idle | loading | ready | error
   const [zoom, setZoom] = useState(1);
-  const [wrapWidth, setWrapWidth] = useState(0);
-  // 'page' 一次看到整頁（桌機預設）／'width' 貼合寬度、細節較大
-  const [fitMode, setFitMode] = useState('page');
+  const [wrapSize, setWrapSize] = useState({ w: 0, h: 0 });
+  // 'width' 貼合寬度（預設）／'page' 一次看到整頁。
+  // 檢視框通常寬而矮，整頁模式會為了塞進高度把直式譜縮成中間一條窄帶，
+  // 譜面小到看不清楚 —— 所以預設先把寬度填滿，再讓使用者決定要不要縮成整頁。
+  const [fitMode, setFitMode] = useState('width');
   const [canvasBlank, setCanvasBlank] = useState(prefersNativeViewer);
   const [rendered, setRendered] = useState(false);
   const pageImages = sheet?.pageImages || [];
@@ -818,8 +820,9 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
       // iOS 上 effect 可能早於版面就緒，clientWidth 會是 0，
       // 算出來的畫布尺寸就變成 0 —— 工具列正常但譜是空白的典型症狀。
       const measured = wrapRef.current?.clientWidth || 0;
+      const measuredH = wrapRef.current?.clientHeight || 0;
       const avail = Math.max(280, (measured > 40 ? measured : (window.innerWidth || 800)) - 24);
-      const availH = Math.max(200, (wrapRef.current?.clientHeight || 600) - 24);
+      const availH = Math.max(200, (measuredH > 40 ? measuredH : 600) - 24);
       const base = page.getViewport({ scale: 1 });
       // 整頁模式取寬高兩者的較小比例，讓整張譜一次進得了畫面
       const fitScale = fitMode === 'page'
@@ -892,7 +895,7 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
     })();
 
     return () => { cancelled = true; };
-  }, [doc, pageNum, zoom, wrapWidth, fitMode]);
+  }, [doc, pageNum, zoom, wrapSize.w, wrapSize.h, fitMode]);
 
   // 看門狗：某些裝置上 PDF.js 會卡住或畫出空白卻不報錯。
   // 一段時間內沒有確認畫出內容，就直接改用瀏覽器內建顯示，
@@ -905,13 +908,14 @@ const SheetViewer = ({ sheet, language, height = '75vh' }) => {
     return () => clearTimeout(timer);
   }, [doc, canvasBlank, rendered]);
 
-  // 監看容器寬度：iOS 首次量到 0、或使用者轉向時，都要重畫
+  // 監看容器尺寸：iOS 首次量到 0、使用者轉向、或上方多出一列而讓高度改變時，都要重畫。
+  // 只看寬度會漏掉高度變化，整頁模式就會停在依舊高度算出來的比例。
   useEffect(() => {
     const el = wrapRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => {
-      const w = el.clientWidth;
-      setWrapWidth(prev => (Math.abs(prev - w) > 8 ? w : prev));
+      const w = el.clientWidth, h = el.clientHeight;
+      setWrapSize(prev => (Math.abs(prev.w - w) > 8 || Math.abs(prev.h - h) > 8 ? { w, h } : prev));
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -2679,7 +2683,8 @@ export default function App() {
                   {filteredHomeSetlists.length > 0 ? filteredHomeSetlists.map(item => {
                     const parts = item.date ? String(item.date).split('-') : [];
                     return (
-                      <div key={item.id} className="p-4 sm:p-6 md:p-8 hover:bg-slate-50 transition flex flex-col md:flex-row gap-4 sm:gap-6 md:gap-8 items-start md:items-center group">
+                      <div key={item.id} className="hover:bg-slate-50 transition group">
+                        <div className="p-4 sm:p-6 md:p-8 flex flex-col md:flex-row gap-4 sm:gap-6 md:gap-8 items-start md:items-center">
                         
                         <div className="flex gap-4 sm:gap-5 items-center shrink-0 w-full sm:w-auto min-w-[200px] border-b sm:border-0 border-slate-100 pb-3 sm:pb-0">
                           <div className="text-center w-14 sm:w-16">
@@ -2714,11 +2719,6 @@ export default function App() {
                               );
                             })}
                           </div>
-                          {item.team && !isRosterEmpty(item.team) && (
-                            <div className="mt-3 pt-3 border-t border-slate-100">
-                              <TeamLine team={item.team} language={language} t={t} iconSize={13} valueClass="text-[11px]" />
-                            </div>
-                          )}
                         </div>
                         
                         <div className="flex flex-col gap-2 shrink-0 w-full md:w-[130px] pt-4 md:pt-0 mt-2 md:mt-0 border-t md:border-0 border-slate-50">
@@ -2746,6 +2746,14 @@ export default function App() {
                             </button>
                           </div>
                         </div>
+                        </div>
+
+                        {/* 服事同工：整張卡片寬度的一條淡底色橫帶，順便把每週分得更開 */}
+                        {item.team && !isRosterEmpty(item.team) && (
+                          <div className="px-4 sm:px-6 md:px-8 py-2.5 bg-slate-50/80 border-t border-slate-100 overflow-x-auto custom-scrollbar">
+                            <TeamLine team={item.team} language={language} t={t} wrap={false} iconSize={13} valueClass="text-[11px]" />
+                          </div>
+                        )}
                       </div>
                     );
                   }) : (
@@ -3672,22 +3680,22 @@ const ROLE_ICONS = {
 
 // 服事同工：圖示＋人名。主領預設不放進來 —— 它在每個畫面上都有更顯眼的位置。
 const TeamLine = ({ team, language, t, includeWl = false, className = '',
-                   iconSize = 12, valueClass = 'text-[11px]', tooltip = true }) => {
+                   iconSize = 12, valueClass = 'text-[11px]', tooltip = true, wrap = true }) => {
   if (!team) return null;
   const roles = ROSTER_ROLES
     .filter(r => includeWl || r.key !== 'wl')
     .filter(r => (team[r.key] || []).length);
   if (!roles.length) return null;
   return (
-    <div className={`flex flex-wrap items-center gap-x-2.5 gap-y-1 ${className}`}>
+    <div className={`flex items-center gap-x-2.5 gap-y-1 ${wrap ? 'flex-wrap' : 'flex-nowrap'} ${className}`}>
       {roles.map((r, i) => {
         const Icon = ROLE_ICONS[r.key] || Users;
         return (
           <React.Fragment key={r.key}>
-            {i > 0 && <span className="text-slate-300 text-[10px] leading-none">·</span>}
-            <span className={`inline-flex items-center gap-1 ${tooltip ? 'relative group/tt' : ''}`}>
+            {i > 0 && <span className="text-slate-300 text-[10px] leading-none shrink-0">·</span>}
+            <span className={`inline-flex items-center gap-1 shrink-0 ${tooltip ? 'relative group/tt' : ''}`}>
               <Icon size={iconSize} className="text-sky-500 shrink-0" aria-label={t(r.label, language)} />
-              <span className={`${valueClass} font-medium text-slate-600`}>{formatNames(team[r.key])}</span>
+              <span className={`${valueClass} font-medium text-slate-600 whitespace-nowrap`}>{formatNames(team[r.key])}</span>
               {tooltip && <FastTooltip text={t(r.label, language)} />}
             </span>
           </React.Fragment>
