@@ -18,6 +18,7 @@ export const ROSTER_ROLES = [
   { key: 'drums', label: '鼓' },
   { key: 'bass', label: '貝斯' },
   { key: 'sound', label: '音控' },
+  { key: 'projection', label: '投影' },
 ];
 
 // --- CSV ---------------------------------------------------------------
@@ -61,15 +62,19 @@ const findColumns = (header) => {
     drums: at(h => h.startsWith('drum')),
     bass: at(h => h.startsWith('bass')),
     sound: at(h => h.startsWith('sound')),
+    projection: at(h => h.replace(/\s+/g, '') === 'propresenter'),
   };
 };
+
+// 表上用來表示「這格沒人」的寫法，不是人名
+const isPlaceholder = (name) => /^(-+|—|–|n\/?a|na|tbd|tba|\?+|x)$/i.test(name);
 
 // 「Jovy / Rudy」「Sean/Rudy(2)」「Howard / Rudy (Bilingual)」→ ['Jovy', 'Rudy']
 // 括號註記（雙語、第幾堂）不是人名，去掉；原始文字另外留著，不會弄丟資訊。
 const splitNames = (cell) => String(cell || '')
   .split(/[/,、]/)
   .map(s => s.replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim())
-  .filter(Boolean);
+  .filter(s => s && !isPlaceholder(s));
 
 const collect = (row, cols) => {
   const seen = new Set();
@@ -136,6 +141,7 @@ const parseTable = (csvText) => {
       drums: collect(row, cols.drums),
       bass: collect(row, cols.bass),
       sound: collect(row, cols.sound),
+      projection: collect(row, cols.projection),
       raw: cols.wl.map(ci => row[ci]).join(' ').trim(),
     });
   });

@@ -75,6 +75,12 @@ const TRANSLATIONS = {
   "鼓": "Drums",
   "貝斯": "Bass",
   "音控": "Sound",
+  "投影": "ProPresenter",
+  "服事表主領": "Roster leader",
+  "服事表尚未排班": "Not on the roster yet",
+  "讀取中...": "Loading...",
+  "歌單資訊": "Setlist Info",
+  "詩歌清單": "Songs",
   "讀取服事表...": "Reading roster...",
   "服事表還沒排這一天": "Roster not set for this date",
   "從服事表同步": "Sync from roster",
@@ -1052,6 +1058,8 @@ export default function App() {
   // 服事表查詢結果。查不到、抓不到一律退回手動輸入，不擋人做歌單。
   const [roster, setRoster] = useState({ status: 'idle', team: null });
   const autoWlRef = useRef('');   // 上一次自動填入的主領字串，用來分辨「主領有沒有自己改過」
+  const [rosterPeek, setRosterPeek] = useState({});   // 日曆上滑過的日期 → 服事表主領
+  const peekedRef = useRef(new Set());
   const metaRef = useRef(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -1377,12 +1385,6 @@ export default function App() {
     }
   };
 
-  // 首頁的「當週」＝ 今天之後最近的一份歌單（都過去了就用最新的那份）
-  const currentWeekId = (() => {
-    const upcoming = setlistsDb.filter(x => x.date >= today).sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
-    return (upcoming || setlistsDb[0])?.id || null;
-  })();
-
   const filteredHomeSetlists = setlistsDb.filter(item => {
     const q = homeSearchQuery.toLowerCase();
     if (!q) return true;
@@ -1392,6 +1394,19 @@ export default function App() {
   // --- Calendar Logic ---
   const prevMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
   const nextMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+
+  // 日曆上滑過的日期，先去服事表看那天誰帶敬拜（同一年只會抓一次，之後都是查快取）
+  const peekRoster = useCallback((dateStr) => {
+    if (peekedRef.current.has(dateStr)) return;
+    peekedRef.current.add(dateStr);
+    setRosterPeek(prev => ({ ...prev, [dateStr]: { status: 'loading' } }));
+    lookupRoster(dateStr)
+      .then(team => setRosterPeek(prev => ({
+        ...prev,
+        [dateStr]: { status: 'done', wl: team ? formatNames(team.wl) : '' },
+      })))
+      .catch(() => setRosterPeek(prev => ({ ...prev, [dateStr]: { status: 'done', wl: '' } })));
+  }, []);
 
   const renderCalendar = () => {
     const year = currentMonth.getFullYear();
@@ -1417,15 +1432,26 @@ export default function App() {
       const isSelected = homeSearchQuery === dateStr;
       const isToday = dateStr === today;
       
-      let tooltipText = '';
+      const lines = [];
       if (hasSetlist) {
-        tooltipText = daySetlists.map(s => `${t('主領', language)}: ${s.wl || t('未指定', language)}`).join('\n');
+        lines.push(...daySetlists.map(s => `${t('主領', language)}: ${s.wl || t('未指定', language)}`));
       }
+      const peek = rosterPeek[dateStr];
+      if (peek?.status === 'loading') lines.push(t('讀取中...', language));
+      else if (peek?.status === 'done') {
+        lines.push(peek.wl
+          ? `${t('服事表主領', language)}: ${peek.wl}`
+          : t('服事表尚未排班', language));
+      }
+      const tooltipText = lines.join('\n');
 
       days.push(
         <div key={d} className="p-1 flex justify-center items-center">
           <button
+            onMouseEnter={() => peekRoster(dateStr)}
+            onFocus={() => peekRoster(dateStr)}
             onClick={() => {
+              peekRoster(dateStr);
               if (homeSearchQuery === dateStr) setHomeSearchQuery(''); // 取消過濾
               else if (hasSetlist) setHomeSearchQuery(dateStr); // 過濾此日歌單
             }}
@@ -1433,13 +1459,13 @@ export default function App() {
               ${isSelected ? 'bg-sky-500 text-white font-bold shadow-md scale-110' :
                 hasSetlist ? 'bg-sky-50 text-sky-600 font-bold hover:bg-sky-100 border border-sky-200 cursor-pointer' :
                 isToday ? 'bg-slate-100 text-slate-900 font-bold' :
-                'text-slate-400 hover:bg-slate-50 cursor-default opacity-50'}`}
+                'text-slate-400 hover:bg-slate-50 opacity-60'}`}
           >
             {d}
             {hasSetlist && !isSelected && (
               <span className="absolute bottom-0.5 w-1 h-1 bg-sky-500 rounded-full"></span>
             )}
-            {hasSetlist && <FastTooltip text={tooltipText} />}
+            <FastTooltip text={tooltipText} />
           </button>
         </div>
       );
@@ -2605,7 +2631,7 @@ export default function App() {
                               );
                             })}
                           </div>
-                          {item.id === currentWeekId && item.team && !isRosterEmpty(item.team) && (
+                          {item.team && !isRosterEmpty(item.team) && (
                             <div className="mt-3 pt-3 border-t border-slate-100">
                               <TeamLine team={item.team} language={language} t={t} labelClass="text-[8px]" valueClass="text-[10px]" />
                             </div>
@@ -2691,15 +2717,17 @@ export default function App() {
         <div className="pb-20 max-w-4xl mx-auto p-4 sm:p-8 pt-4 sm:pt-6 w-full">
           <header className="mb-6 sm:mb-10 text-center flex flex-col items-center border-b border-slate-200 pb-4 sm:pb-6"><ICCLogo className="mb-4 sm:mb-5 scale-90" /><h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 mb-2 uppercase">{currentSetlistId ? t('編輯歌單', language) : t('建立新歌單', language)}</h1></header>
           <div className="flex flex-col sm:flex-row justify-end mb-6 gap-3">
-            <button onClick={saveCurrentSetlist} disabled={isSavingSetlist} className={`w-full sm:w-auto px-6 py-2.5 rounded-xl font-serif text-sm transition shadow-sm flex items-center justify-center gap-2 ${saveSuccess ? 'bg-green-600 text-white' : (hasSetlistChanges ? 'bg-sky-50 border border-sky-500 text-sky-600 hover:bg-sky-100' : 'bg-white border border-slate-200 text-slate-400 cursor-not-allowed')}`}><Save size={18}/> {isSavingSetlist ? t('儲存中...', language) : (saveSuccess ? t('已成功儲存！', language) : t('儲存歌單', language))}</button>
-            <button onClick={openPreviewFromList} className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-serif text-sm bg-sky-500 hover:bg-sky-600 text-white flex items-center justify-center gap-2 shadow-lg transition"><Eye size={18}/> {t('預覽與輸出', language)}</button>
+            <button onClick={saveCurrentSetlist} disabled={isSavingSetlist} className={`w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-sm transition shadow-sm flex items-center justify-center gap-2 ${saveSuccess ? 'bg-green-600 text-white shadow-md' : (hasSetlistChanges ? 'bg-sky-50 border border-sky-500 text-sky-600 hover:bg-sky-100' : 'bg-white border border-slate-200 text-slate-400 cursor-not-allowed')}`}><Save size={18}/> {isSavingSetlist ? t('儲存中...', language) : (saveSuccess ? t('已成功儲存！', language) : t('儲存歌單', language))}</button>
+            <button onClick={openPreviewFromList} className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-sm bg-sky-500 hover:bg-sky-600 text-white flex items-center justify-center gap-2 shadow-lg transition"><Eye size={18}/> {t('預覽與輸出', language)}</button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6 sm:gap-8">
-            <div className="md:col-span-4 bg-white p-5 sm:p-6 border rounded-2xl h-fit shadow-sm">
-              <h2 className="text-xs sm:text-sm font-bold tracking-widest text-slate-900 border-b pb-3 mb-5 sm:mb-6 uppercase">Information</h2>
-              <div className="space-y-4">
-                <div><label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest">{t('日期', language)}</label><input type="date" value={meta.date} onChange={e => handleMetaChange('date', e.target.value)} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" /></div>
-                <div><label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest">{t('主領', language)}</label><input type="text" value={meta.wl} onChange={e => handleMetaChange('wl', e.target.value)} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('主領是誰呢', language)} />
+            <div className="md:col-span-4 bg-white p-5 sm:p-6 border border-slate-200 rounded-2xl h-fit shadow-sm">
+              <h2 className="text-lg sm:text-xl font-bold font-serif text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3 mb-5 sm:mb-6">
+                <CalendarDays size={20} className="text-sky-500"/> {t('歌單資訊', language)}
+              </h2>
+              <div className="space-y-5">
+                <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">{t('日期', language)}</label><input type="date" value={meta.date} onChange={e => handleMetaChange('date', e.target.value)} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-white shadow-sm focus:border-sky-500 outline-none transition text-sm sm:text-base" /></div>
+                <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">{t('主領', language)}</label><input type="text" value={meta.wl} onChange={e => handleMetaChange('wl', e.target.value)} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-white shadow-sm focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('主領是誰呢', language)} />
                   <div className="mt-2 min-h-[18px]">
                     {roster.status === 'loading' && (
                       <p className="text-[10px] text-slate-400 flex items-center gap-1"><Loader2 size={11} className="animate-spin"/> {t('讀取服事表...', language)}</p>
@@ -2721,19 +2749,24 @@ export default function App() {
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-sky-500 block mb-1 uppercase tracking-widest flex items-center gap-1"><Youtube size={12}/> {t('YouTube 歌單連結 (選填)', language)}</label>
-                  <input type="text" value={meta.youtubePlaylistUrl} onChange={e => handleMetaChange('youtubePlaylistUrl', e.target.value)} className="w-full px-3 py-2 border-b-2 bg-transparent focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('貼上 YouTube 歌單網址...', language)} />
+                  <label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest flex items-center gap-1"><Youtube size={12} className="text-red-400"/> {t('YouTube 歌單連結 (選填)', language)}</label>
+                  <input type="text" value={meta.youtubePlaylistUrl} onChange={e => handleMetaChange('youtubePlaylistUrl', e.target.value)} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-white shadow-sm focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('貼上 YouTube 歌單網址...', language)} />
                 </div>
               </div>
             </div>
             <div className="md:col-span-8 space-y-4">
-              <div className="flex justify-between items-end border-b pb-3"><h2 className="text-xs sm:text-sm font-bold uppercase tracking-widest">Setlist</h2><button onClick={() => openEditor()} className="text-xs font-bold text-sky-600 bg-sky-50 hover:bg-sky-100 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg transition">{t('+ 新增詩歌', language)}</button></div>
+              <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                <h2 className="text-lg sm:text-xl font-bold font-serif text-slate-900 flex items-center gap-2">
+                  <ListMusic size={20} className="text-sky-500"/> {t('詩歌清單', language)}
+                </h2>
+                <button onClick={() => openEditor()} className="text-xs font-bold text-white bg-sky-500 hover:bg-sky-600 px-4 py-2 rounded-xl shadow-md transition whitespace-nowrap">{t('+ 新增詩歌', language)}</button>
+              </div>
               <div className="space-y-3">
                 {setlist.map((item, index) => (
-                  <div key={item.id} className="bg-white border rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between group shadow-sm transition hover:border-sky-200 gap-3">
+                  <div key={item.id} className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between group shadow-sm transition hover:border-sky-200 gap-3">
                     <div className="flex-1 w-full overflow-hidden">
                       <div className="flex items-center gap-2 sm:gap-3 mb-1">
-                        <span className="bg-sky-100 text-sky-700 px-2 py-0.5 rounded text-[10px] sm:text-xs font-bold shrink-0">0{index + 1}</span>
+                        <span className="shrink-0 w-6 h-6 rounded-md bg-slate-900 text-white flex items-center justify-center font-serif font-bold text-[11px]">{index + 1}</span>
                         <h3 className="font-bold font-serif text-base sm:text-lg truncate">{String(item.title || t('未命名', language))} <span className="font-sans font-normal text-slate-400 text-xs sm:text-sm">({String(item.key || 'C')})</span></h3>
                       </div>
                       <div className="text-[11px] sm:text-[13px] text-blue-600 font-mono pl-8 sm:pl-9 font-bold tracking-wider overflow-x-auto custom-scrollbar pb-1">
@@ -3336,7 +3369,6 @@ export default function App() {
               <div className="flex items-center gap-3 shrink-0">
                 <div className="text-right hidden sm:block">
                   <div className="font-mono font-bold text-sky-600 text-xs leading-tight">{meta.date?.replace(/-/g, ' / ')}</div>
-                  <div className="text-[10px] text-slate-500 flex items-center gap-1 justify-end"><User size={10}/> {meta.wl || t('未指定', language)}</div>
                 </div>
                 <button onClick={() => setShowSongMap(v => !v)}
                   className={`lg:hidden px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition flex items-center gap-1.5 ${showSongMap ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'}`}>
@@ -3350,11 +3382,13 @@ export default function App() {
               </div>
             </div>
 
-            {meta.team && !isRosterEmpty(meta.team) && (
-              <div className="shrink-0 bg-white border-b border-slate-200 px-3 sm:px-5 py-2">
-                <TeamLine team={meta.team} language={language} t={t} labelClass="text-[8px]" valueClass="text-[10px]" />
-              </div>
-            )}
+            <div className="shrink-0 bg-white border-b border-slate-200 px-3 sm:px-5 py-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <span className="inline-flex items-baseline gap-1.5">
+                <span className="text-[9px] font-bold uppercase tracking-widest text-sky-500">{t('主領', language)}</span>
+                <span className="text-[12px] font-bold text-slate-900">{meta.wl || t('未指定', language)}</span>
+              </span>
+              <TeamLine team={meta.team} language={language} t={t} labelClass="text-[8px]" valueClass="text-[10px]" />
+            </div>
 
             {mergeError && (
               <div className="shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 text-[11px] text-amber-800 font-bold flex items-start gap-2">
