@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
-import { Search, Plus, Trash2, ArrowUp, ArrowDown, Edit2, X, ChevronLeft, ChevronRight, Download, FileText, Music, Eye, Database, BookOpen, Save, CalendarDays, User, Home, ListMusic, Lock, Unlock, Youtube, Sparkles, Wand2, Loader2, Crown, Code, Layers, Globe } from 'lucide-react';
+import { Search, Plus, Trash2, ArrowUp, ArrowDown, Edit2, X, ChevronLeft, ChevronRight, Download, FileText, Music, Eye, Database, BookOpen, Save, CalendarDays, User, Home, ListMusic, Lock, Unlock, Youtube, Sparkles, Wand2, Loader2, Crown, Code, Layers, Globe, Mic, Users, Piano, Drum, Guitar, SlidersHorizontal, Projector } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
-import { ROSTER_ROLES, lookupRoster, isRosterEmpty, formatNames } from './roster';
+import { ROSTER_ROLES, lookupRoster, isRosterEmpty, formatNames, parseNameList } from './roster';
 
 // -----------------------------------------------------------------------------
 // Translations (i18n) Dictionary
@@ -77,13 +77,13 @@ const TRANSLATIONS = {
   "音控": "Sound",
   "投影": "ProPresenter",
   "服事表主領": "Roster leader",
+  "多人用 / 分隔。改過的欄位不會再被服事表覆蓋。": "Separate names with /. Edited fields are never overwritten by the roster.",
   "服事表尚未排班": "Not on the roster yet",
   "讀取中...": "Loading...",
   "歌單資訊": "Setlist Info",
   "詩歌清單": "Songs",
   "讀取服事表...": "Reading roster...",
   "服事表還沒排這一天": "Roster not set for this date",
-  "從服事表同步": "Sync from roster",
   "歷史歌單": "Old setlist",
   "檔名無歌名": "No title in filename",
   "改用新分頁開啟": "Open in a new tab",
@@ -1057,7 +1057,9 @@ export default function App() {
   const [meta, setMeta] = useState({ date: today, wl: '', youtubePlaylistUrl: '', team: null });
   // 服事表查詢結果。查不到、抓不到一律退回手動輸入，不擋人做歌單。
   const [roster, setRoster] = useState({ status: 'idle', team: null });
-  const autoWlRef = useRef('');   // 上一次自動填入的主領字串，用來分辨「主領有沒有自己改過」
+  // 主領手動改過的角色。自動填入只補沒被改過的欄位，改過的就永遠以人工為準。
+  const editedRolesRef = useRef(new Set());
+  const [teamDraft, setTeamDraft] = useState({});   // 輸入中的原字串，避免打到一半被正規化
   const [rosterPeek, setRosterPeek] = useState({});   // 日曆上滑過的日期 → 服事表主領
   const peekedRef = useRef(new Set());
   const metaRef = useRef(null);
@@ -1263,23 +1265,33 @@ export default function App() {
     }
   }, [hasSetlistChanges, view, saveCurrentSetlist, isSavingSetlist]);
 
-  // 把服事表的結果套進歌單。onlyIfUntouched 時不會蓋掉主領手動改過的名字。
-  const applyRoster = useCallback((team, { onlyIfUntouched = false } = {}) => {
+  // 把服事表的結果套進歌單：只填「沒有被手動改過」的角色。
+  // 改過的欄位不會再被服事表蓋回去 —— 人工輸入永遠是最後一句話。
+  const applyRoster = useCallback((team) => {
     const prev = metaRef.current;
     if (!prev) return;
-    const wl = formatNames(team.wl);
-    // 主領手動改過名字時（跟上次自動填入的不一樣），自動同步不去蓋它
-    const edited = prev.wl && prev.wl !== autoWlRef.current;
-    const keepWl = (onlyIfUntouched && edited) || !wl;
-    const next = { ...prev, team, wl: keepWl ? prev.wl : wl };
+    const edited = editedRolesRef.current;
+    const nextTeam = { ...(prev.team || {}) };
+    ROSTER_ROLES.forEach(r => { if (!edited.has(r.key)) nextTeam[r.key] = team[r.key] || []; });
+    const wl = edited.has('wl') ? prev.wl : (formatNames(team.wl) || prev.wl);
+    const next = { ...prev, wl, team: nextTeam };
     // 真的有變才算「未儲存的變更」，只是打開來看不該讓歌單變成待存
     if (next.wl === prev.wl && JSON.stringify(next.team) === JSON.stringify(prev.team)) return;
-    if (!keepWl) autoWlRef.current = wl;
     setMeta(next);
     setHasSetlistChanges(true);
   }, []);
 
+  // 手動修改某個角色
+  const handleTeamChange = (roleKey, value) => {
+    editedRolesRef.current.add(roleKey);
+    setTeamDraft(prev => ({ ...prev, [roleKey]: value }));
+    setMeta(prev => ({ ...prev, team: { ...(prev.team || {}), [roleKey]: parseNameList(value) } }));
+    setHasSetlistChanges(true);
+  };
+
   useEffect(() => { metaRef.current = meta; }, [meta]);
+
+  const resetRosterEdits = () => { editedRolesRef.current = new Set(); setTeamDraft({}); };
 
   // 編輯歌單時，選了日期就去查那一週的服事表
   useEffect(() => {
@@ -1297,7 +1309,10 @@ export default function App() {
 
   // Helper functions to update state and mark as changed
   const handleMetaChange = (field, value) => {
-    setMeta(prev => ({ ...prev, [field]: value }));
+    if (field === 'wl') editedRolesRef.current.add('wl');
+    setMeta(prev => (field === 'wl'
+      ? { ...prev, wl: value, team: { ...(prev.team || {}), wl: parseNameList(value) } }
+      : { ...prev, [field]: value }));
     setHasSetlistChanges(true);
   };
 
@@ -1573,6 +1588,7 @@ export default function App() {
   };
 
   const openSetlist = (obj) => { 
+    resetRosterEdits();
     setCurrentSetlistId(obj.id); 
     loadLocalPicks(obj.id);
     setMeta({ date: obj.date, wl: obj.wl, youtubePlaylistUrl: obj.youtubePlaylistUrl || '', team: obj.team || null }); 
@@ -1580,7 +1596,7 @@ export default function App() {
     setHasSetlistChanges(false);
     setView('list'); 
   };
-  const createNewSetlist = () => { setCurrentSetlistId(null); setMeta({ date: today, wl: '', youtubePlaylistUrl: '', team: null }); setSetlist([]); setHasSetlistChanges(false); setView('list'); };
+  const createNewSetlist = () => { resetRosterEdits(); setCurrentSetlistId(null); setMeta({ date: today, wl: '', youtubePlaylistUrl: '', team: null }); setSetlist([]); setHasSetlistChanges(false); setView('list'); };
   const openPreviewFromHome = (obj) => { openSetlist(obj); setPreviewSource('home'); setView('preview'); };
   const openPreviewFromList = () => { setPreviewSource('list'); setView('preview'); };
 
@@ -2633,7 +2649,7 @@ export default function App() {
                           </div>
                           {item.team && !isRosterEmpty(item.team) && (
                             <div className="mt-3 pt-3 border-t border-slate-100">
-                              <TeamLine team={item.team} language={language} t={t} labelClass="text-[8px]" valueClass="text-[10px]" />
+                              <TeamLine team={item.team} language={language} t={t} iconSize={13} valueClass="text-[11px]" />
                             </div>
                           )}
                         </div>
@@ -2728,25 +2744,35 @@ export default function App() {
               <div className="space-y-5">
                 <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">{t('日期', language)}</label><input type="date" value={meta.date} onChange={e => handleMetaChange('date', e.target.value)} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-white shadow-sm focus:border-sky-500 outline-none transition text-sm sm:text-base" /></div>
                 <div><label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">{t('主領', language)}</label><input type="text" value={meta.wl} onChange={e => handleMetaChange('wl', e.target.value)} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-white shadow-sm focus:border-sky-500 outline-none transition text-sm sm:text-base" placeholder={t('主領是誰呢', language)} />
-                  <div className="mt-2 min-h-[18px]">
+                  <div className="mt-2 min-h-[16px]">
                     {roster.status === 'loading' && (
                       <p className="text-[10px] text-slate-400 flex items-center gap-1"><Loader2 size={11} className="animate-spin"/> {t('讀取服事表...', language)}</p>
                     )}
                     {roster.status === 'none' && (
                       <p className="text-[10px] text-slate-400">{t('服事表還沒排這一天', language)}</p>
                     )}
-                    {roster.status === 'found' && roster.team && (
-                      <div className="space-y-1.5">
-                        <TeamLine team={roster.team} language={language} t={t} labelClass="text-[8px]" valueClass="text-[10px]" />
-                        {formatNames(roster.team.wl) && formatNames(roster.team.wl) !== meta.wl && (
-                          <button type="button" onClick={() => applyRoster(roster.team)}
-                            className="text-[10px] font-bold text-sky-600 hover:text-sky-700 underline underline-offset-2 text-left">
-                            {t('從服事表同步', language)}：{formatNames(roster.team.wl)}
-                          </button>
-                        )}
-                      </div>
-                    )}
                   </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest">{t('服事同工', language)}</label>
+                  <div className="space-y-2">
+                    {ROSTER_ROLES.filter(r => r.key !== 'wl').map(r => {
+                      const Icon = ROLE_ICONS[r.key] || Users;
+                      const shown = teamDraft[r.key] ?? formatNames(meta.team?.[r.key]);
+                      return (
+                        <div key={r.key} className="flex items-center gap-2" title={t(r.label, language)}>
+                          <Icon size={15} className="text-slate-400 shrink-0" aria-label={t(r.label, language)} />
+                          <input type="text" value={shown}
+                            onChange={e => handleTeamChange(r.key, e.target.value)}
+                            onBlur={() => setTeamDraft(prev => { const n = { ...prev }; delete n[r.key]; return n; })}
+                            placeholder={t(r.label, language)}
+                            className="flex-1 min-w-0 px-3 py-1.5 border border-slate-200 rounded-lg bg-white text-[13px] focus:border-sky-500 outline-none transition" />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[9px] text-slate-400 mt-2 leading-relaxed">{t('多人用 / 分隔。改過的欄位不會再被服事表覆蓋。', language)}</p>
                 </div>
                 <div>
                   <label className="text-[10px] sm:text-[11px] font-bold text-slate-400 block mb-2 uppercase tracking-widest flex items-center gap-1"><Youtube size={12} className="text-red-400"/> {t('YouTube 歌單連結 (選填)', language)}</label>
@@ -3383,11 +3409,12 @@ export default function App() {
             </div>
 
             <div className="shrink-0 bg-white border-b border-slate-200 px-3 sm:px-5 py-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-              <span className="inline-flex items-baseline gap-1.5">
-                <span className="text-[9px] font-bold uppercase tracking-widest text-sky-500">{t('主領', language)}</span>
+              <span className="inline-flex items-center gap-1.5" title={t('主領', language)}>
+                <Mic size={14} className="text-sky-500 shrink-0" aria-label={t('主領', language)} />
                 <span className="text-[12px] font-bold text-slate-900">{meta.wl || t('未指定', language)}</span>
               </span>
-              <TeamLine team={meta.team} language={language} t={t} labelClass="text-[8px]" valueClass="text-[10px]" />
+              <span className="text-slate-300 text-[10px] leading-none">·</span>
+              <TeamLine team={meta.team} language={language} t={t} iconSize={13} valueClass="text-[11px]" />
             </div>
 
             {mergeError && (
@@ -3555,22 +3582,40 @@ export default function App() {
 const PRINT_PAGE_W = 816;
 const PRINT_PAGE_H = 975;
 
-// 服事同工：一行灰階小字。主領不放進來 —— 它在每個畫面上都有更顯眼的位置。
+// 每個角色一個圖示：主領麥克風、鍵盤、鼓、貝斯、音控推桿、投影機。
+// 小尺寸下比一串文字標籤好認，列印時也更省空間。
+const ROLE_ICONS = {
+  wl: Mic,
+  vocals: Users,
+  keys: Piano,
+  drums: Drum,
+  bass: Guitar,
+  sound: SlidersHorizontal,
+  projection: Projector,
+};
+
+// 服事同工：圖示＋人名。主領預設不放進來 —— 它在每個畫面上都有更顯眼的位置。
 const TeamLine = ({ team, language, t, includeWl = false, className = '',
-                   labelClass = 'text-[9px]', valueClass = 'text-[11px]' }) => {
+                   iconSize = 12, valueClass = 'text-[11px]' }) => {
   if (!team) return null;
   const roles = ROSTER_ROLES
     .filter(r => includeWl || r.key !== 'wl')
     .filter(r => (team[r.key] || []).length);
   if (!roles.length) return null;
   return (
-    <div className={`flex flex-wrap items-baseline gap-x-3 gap-y-1 ${className}`}>
-      {roles.map(r => (
-        <span key={r.key} className="inline-flex items-baseline gap-1">
-          <span className={`${labelClass} font-bold uppercase tracking-widest text-slate-400`}>{t(r.label, language)}</span>
-          <span className={`${valueClass} font-medium text-slate-600`}>{formatNames(team[r.key])}</span>
-        </span>
-      ))}
+    <div className={`flex flex-wrap items-center gap-x-2.5 gap-y-1 ${className}`}>
+      {roles.map((r, i) => {
+        const Icon = ROLE_ICONS[r.key] || Users;
+        return (
+          <React.Fragment key={r.key}>
+            {i > 0 && <span className="text-slate-300 text-[10px] leading-none">·</span>}
+            <span className="inline-flex items-center gap-1" title={t(r.label, language)}>
+              <Icon size={iconSize} className="text-slate-400 shrink-0" aria-label={t(r.label, language)} />
+              <span className={`${valueClass} font-medium text-slate-600`}>{formatNames(team[r.key])}</span>
+            </span>
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 };
@@ -3659,14 +3704,16 @@ const PrintLayoutContent = ({ meta, setlist, songsDb, language, t, getTagExplana
         </div>
       </div>
       <div className="text-right flex flex-col items-end gap-1">
-        <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Worship Leader</span>
+        <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+          <Mic size={10} /> Worship Leader
+        </span>
         <span className="text-[15px] font-serif font-bold text-slate-800 leading-none">{meta.wl || t('未指定', language)}</span>
       </div>
       </div>
       {meta.team && !isRosterEmpty(meta.team) && (
         <div className="mt-2">
           <TeamLine team={meta.team} language={language} t={t}
-                    labelClass={isLarge ? 'text-[9px]' : 'text-[7px]'}
+                    iconSize={isLarge ? 13 : 11}
                     valueClass={isLarge ? 'text-[11px]' : 'text-[9px]'} />
         </div>
       )}

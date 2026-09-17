@@ -231,3 +231,10 @@ export const isRosterEmpty = (team) =>
 
 // 顯示用：'Johnny / Zoe / Alex'
 export const formatNames = (names) => (names || []).join(' / ');
+
+// 手動輸入時用的解析：只切開分隔符，不像讀表那樣清掉括號與佔位符 ——
+// 主領想寫什麼就是什麼，不要自作聰明。
+export const parseNameList = (text) => String(text || '')
+  .split(/[/,、]/)
+  .map(x => x.replace(/\s+/g, ' ').trim())
+  .filter(Boolean);
