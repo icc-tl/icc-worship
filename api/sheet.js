@@ -3,7 +3,7 @@
 // 為什麼需要它：R2 的金鑰不能放在前端（前端程式是公開的）。
 // 這支 API 先驗證呼叫者確實是主領，才簽發一次性的上傳網址，
 // 或代為刪除檔案。前端全程接觸不到金鑰。
-import { S3Client, DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomBytes } from 'node:crypto';
 
@@ -34,6 +34,29 @@ async function verifyAdmin(req) {
   if (!user) return { ok: false, status: 401, error: '憑證無效' };
   if (user.localId !== ADMIN_UID) return { ok: false, status: 403, error: '沒有管理權限' };
   return { ok: true, uid: user.localId };
+}
+
+// 金鑰失效時要講得出口的一句話。
+// 這件事真的發生過：R2 的權杖過期後，簽網址仍然會成功（簽章是本機算的，
+// 不會連到 R2），瀏覽器 PUT 才被擋，而 R2 的 403 回應不帶 CORS 標頭，
+// 前端只看得到「Failed to fetch」，完全看不出是金鑰問題。
+const CRED_HINT = '請到 Cloudflare → R2 → Manage R2 API Tokens 重新建立一組 '
+  + 'Object Read & Write 權杖（範圍指定該 bucket），更新 Vercel 的 '
+  + 'R2_ACCESS_KEY_ID 與 R2_SECRET_ACCESS_KEY，然後重新部署一次。';
+
+// 對一個不存在的物件做 HeadObject：
+//   404 → 金鑰有效    401/403 → 金鑰失效或權限不足    其他 → 無法判斷
+// 不能用這個結果去擋上傳（萬一權杖只有寫入權限，讀取本來就會被拒），
+// 所以只當作提示，讓前端在真的失敗時說得出原因。
+async function credentialsLookDead(client, bucket) {
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: 'sheets/__healthcheck__' }));
+    return false;
+  } catch (e) {
+    const status = e?.$metadata?.httpStatusCode;
+    if (status === 401 || status === 403) return true;
+    return false;
+  }
 }
 
 function s3() {
@@ -93,7 +116,8 @@ export default async function handler(req, res) {
         'Cache-Control': cacheControl,
       };
 
-      const url = await getSignedUrl(s3(), new PutObjectCommand({
+      const client = s3();
+      const url = await getSignedUrl(client, new PutObjectCommand({
         Bucket: bucket,
         Key: objectKey,
         ContentType: contentType,
@@ -106,6 +130,9 @@ export default async function handler(req, res) {
         uploadHeaders,
         key: objectKey,
         publicUrl: `${process.env.R2_PUBLIC_URL.replace(/\/$/, '')}/${objectKey}`,
+        // 簽章不會驗證金鑰，所以另外探一次，好讓前端在上傳失敗時指出真正的原因
+        credWarning: await credentialsLookDead(client, bucket),
+        credHint: CRED_HINT,
       });
     }
 
@@ -118,6 +145,10 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: '未知的操作' });
   } catch (e) {
     console.error('Sheet API error:', e);
+    const status = e?.$metadata?.httpStatusCode;
+    if (status === 401 || status === 403) {
+      return res.status(502).json({ error: 'R2 金鑰已失效或權限不足', hint: CRED_HINT });
+    }
     return res.status(500).json({ error: '伺服器處理失敗', details: e.message });
   }
 }

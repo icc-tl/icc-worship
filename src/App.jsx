@@ -50,8 +50,9 @@ const TRANSLATIONS = {
   "從這份樂譜抽出歌詞，確認後才會填入": "Pull lyrics from this sheet — you confirm before anything is filled in",
   "帶入歌詞": "Get Lyrics",
   "步驟4 寫入資料庫失敗": "Step 4 could not save to the database",
+  "步驟3 上傳到雲端失敗：R2 金鑰已失效": "Step 3 upload failed: the R2 key is no longer valid",
+  "步驟3 上傳到雲端失敗（CORS 設定或網路）": "Step 3 upload failed (R2 CORS or network)",
   "步驟3 雲端拒絕上傳": "Step 3 storage rejected the upload",
-  "步驟3 上傳到雲端失敗（多為 R2 的 CORS 設定）": "Step 3 upload to storage failed (usually the R2 CORS policy)",
   "步驟2 連線伺服器失敗": "Step 2 could not reach the server",
   "步驟1 取得登入憑證失敗": "Step 1 could not get your sign-in token",
   "共": "",
@@ -2020,9 +2021,14 @@ export default function App() {
       }
       const niceName = [opts.title || customTitle || '樂譜', opts.key || null, opts.label || null]
         .filter(Boolean).join('_');
-      const { uploadUrl, uploadHeaders, key, publicUrl } = await callSheetApi({
+      const { uploadUrl, uploadHeaders, key, publicUrl, credWarning, credHint } = await callSheetApi({
         action: 'upload', contentType: payload.type, size: payload.size, filename: niceName,
       });
+      // R2 的 403 回應不帶 CORS 標頭，瀏覽器只會說 Failed to fetch。
+      // 伺服器已經先探過金鑰，這裡才有辦法指出真正的原因。
+      const cloudFailure = (detail) => new Error(credWarning
+        ? `${t('步驟3 上傳到雲端失敗：R2 金鑰已失效', language)}。${credHint || ''}`
+        : `${t('步驟3 上傳到雲端失敗（CORS 設定或網路）', language)}：${detail}`);
       let put;
       try {
         // 必須送出伺服器簽章時使用的同一組標頭，少一個都會被拒絕
@@ -2032,10 +2038,14 @@ export default function App() {
           headers: uploadHeaders || { 'Content-Type': payload.type },
         });
       } catch (e) {
-        // 幾乎都是 R2 的 CORS 沒開 PUT，或設定還沒傳播完成
-        throw new Error(`${t('步驟3 上傳到雲端失敗（多為 R2 的 CORS 設定）', language)}：${e.message}`);
+        throw cloudFailure(e.message);
       }
-      if (!put.ok) throw new Error(`${t('步驟3 雲端拒絕上傳', language)}：HTTP ${put.status}`);
+      if (!put.ok) {
+        if (put.status === 401 || put.status === 403) {
+          throw new Error(`${t('步驟3 上傳到雲端失敗：R2 金鑰已失效', language)}。${credHint || ''}`);
+        }
+        throw new Error(`${t('步驟3 雲端拒絕上傳', language)}：HTTP ${put.status}`);
+      }
 
       const fresh = songsDb.find(x => x.id === songId);
       const sheet = {
